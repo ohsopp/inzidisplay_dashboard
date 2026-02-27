@@ -78,6 +78,7 @@ def registers_to_value(regs, data_type, length):
 def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
     """
     폴링 스레드: Coils 60초, Registers 1초. on_parsed({ name: value }) 호출.
+    pymodbus 3.x 서버가 요청 후 연결을 끊는 경우가 있어, 요청마다 새 연결 후 읽고 끊는 방식 사용.
     """
     try:
         from pymodbus.client import ModbusTcpClient
@@ -86,18 +87,24 @@ def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
         return
 
     coil_vars, reg_vars = build_modbus_map()
-    client = ModbusTcpClient(host=host, port=port or 502)
-    if not client.connect():
-        on_error("Modbus TCP 연결 실패")
-        return
-
+    port = port or 502
     parsed = {}
     last_coil_time = [0]
     last_reg_time = [0]
 
+    def connect_client():
+        c = ModbusTcpClient(host=host, port=port, timeout=3)
+        if not c.connect():
+            return None
+        return c
+
     def do_coils():
+        client = connect_client()
+        if not client:
+            on_error("Modbus TCP 연결 실패")
+            return
         try:
-            rr = client.read_coils(0, len(coil_vars), slave=slave_id)
+            rr = client.read_coils(0, count=len(coil_vars), device_id=slave_id)
             if rr.isError():
                 return
             bits = rr.bits[: len(coil_vars)]
@@ -105,15 +112,24 @@ def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
                 parsed[name] = 1 if (i < len(bits) and bits[i]) else 0
         except Exception as e:
             on_error(str(e))
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
 
     def do_registers():
         if not reg_vars:
+            return
+        client = connect_client()
+        if not client:
+            on_error("Modbus TCP 연결 실패")
             return
         start = reg_vars[0][2]
         end = reg_vars[-1][2] + reg_vars[-1][3]
         count = end - start
         try:
-            rr = client.read_holding_registers(start, count, slave=slave_id)
+            rr = client.read_holding_registers(start, count=count, device_id=slave_id)
             if rr.isError():
                 return
             regs = rr.registers
@@ -124,6 +140,11 @@ def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
                 parsed[name] = registers_to_value(chunk, dt, length)
         except Exception as e:
             on_error(str(e))
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
 
     try:
         do_coils()
@@ -143,5 +164,3 @@ def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
             do_registers()
             on_parsed(dict(parsed))
         time.sleep(0.2)
-
-    client.close()

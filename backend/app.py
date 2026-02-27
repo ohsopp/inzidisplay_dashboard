@@ -6,7 +6,11 @@ from flask import Flask, Response, request
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+# CORS: preflight(OPTIONS) 통과하도록 명시 (프론트 localhost:6173 → 백엔드 6005)
+CORS(
+    app,
+    resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}},
+)
 
 client_queues = []
 client_queues_lock = threading.Lock()
@@ -158,13 +162,19 @@ def _modbus_on_error(message):
     broadcast("modbus_error", {"message": message})
 
 
-@app.route("/api/modbus/connect", methods=["POST"])
+@app.route("/api/modbus/connect", methods=["POST", "OPTIONS"])
 def modbus_connect():
+    if request.method == "OPTIONS":
+        return "", 204
+
     global modbus_thread, modbus_stop_event, modbus_state
-    data = request.get_json() or {}
-    host = data.get("host", "127.0.0.1").strip()
-    port = int(data.get("port", 502))
-    slave_id = int(data.get("slave_id", 1))
+    try:
+        data = request.get_json(silent=True) or {}
+        host = (data.get("host") or "127.0.0.1").strip()
+        port = int(data.get("port", 502))
+        slave_id = int(data.get("slave_id", 1))
+    except (TypeError, ValueError) as e:
+        return {"error": f"잘못된 요청: {e}"}, 400
 
     if modbus_thread and modbus_thread.is_alive():
         return {"error": "이미 Modbus TCP에 연결 중입니다."}, 400
@@ -182,20 +192,25 @@ def modbus_connect():
         except ImportError:
             return {"error": "modbus_poller를 불러올 수 없습니다."}, 500
 
-    modbus_stop_event = threading.Event()
-    modbus_thread = threading.Thread(
-        target=run_poller,
-        args=(host, port, slave_id, _modbus_on_parsed, _modbus_on_error, modbus_stop_event),
-        daemon=True,
-    )
-    modbus_thread.start()
-    modbus_state = {"host": host, "port": port, "slave_id": slave_id}
-    broadcast("modbus_connected", modbus_state)
-    return {"ok": True}
+    try:
+        modbus_stop_event = threading.Event()
+        modbus_thread = threading.Thread(
+            target=run_poller,
+            args=(host, port, slave_id, _modbus_on_parsed, _modbus_on_error, modbus_stop_event),
+            daemon=True,
+        )
+        modbus_thread.start()
+        modbus_state = {"host": host, "port": port, "slave_id": slave_id}
+        broadcast("modbus_connected", modbus_state)
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}, 500
 
 
-@app.route("/api/modbus/disconnect", methods=["POST"])
+@app.route("/api/modbus/disconnect", methods=["POST", "OPTIONS"])
 def modbus_disconnect():
+    if request.method == "OPTIONS":
+        return "", 204
     global modbus_thread, modbus_stop_event, modbus_state
     if modbus_stop_event:
         modbus_stop_event.set()

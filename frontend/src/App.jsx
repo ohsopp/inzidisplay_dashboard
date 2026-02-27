@@ -208,8 +208,8 @@ function App() {
   const [modbusConnected, setModbusConnected] = useState(false)
   const [modbusError, setModbusError] = useState('')
   const [modbusHost, setModbusHost] = useState('127.0.0.1')
-  const [modbusPort, setModbusPort] = useState('502')
-  const [modbusSlaveId, setModbusSlaveId] = useState('1')
+  const [modbusPort, setModbusPort] = useState('5051')
+  const [modbusSlaveId, setModbusSlaveId] = useState('0')
   const messagesEndRef = useRef(null)
   const eventSourceRef = useRef(null)
   const ioVariableListRef = useRef([])
@@ -371,8 +371,8 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           host: modbusHost.trim(),
-          port: parseInt(modbusPort, 10) || 502,
-          slave_id: parseInt(modbusSlaveId, 10) || 1,
+          port: parseInt(modbusPort, 10) || 5051,
+          slave_id: (() => { const n = parseInt(modbusSlaveId, 10); return Number.isNaN(n) ? 0 : n; })(),
         }),
       })
       const data = await res.json()
