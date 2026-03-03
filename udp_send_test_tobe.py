@@ -20,8 +20,8 @@ INTERVAL_SEC = 1.0
 SCRIPT_DIR = Path(__file__).resolve().parent
 IO_VARIABLES_PATH = SCRIPT_DIR / "io_variables.json"
 
-# 칼럼 ID/설명에 맞춘 유의미한 더미값 (Word/Dword는 scale 적용 전 raw 정수)
-MEANINGFUL_WORD_DWORD = {
+# 칼럼 ID/설명에 맞춘 유의미한 더미값 (Word는 16bit, Dword는 32bit 논리값 → 16bit씩 하위/상위로 분할)
+MEANINGFUL_WORD = {
     "currentDieNumber_D140": 42,
     "nextDieNumber_D510": 43,
     "currentDieHeight_D711": 3505,   # 350.5 mm
@@ -41,21 +41,17 @@ MEANINGFUL_WORD_DWORD = {
     "oilSupplyCountBalanceCylinder_D21": 3,
     "oilSupplyCountCrownLeft_D22": 50,
     "oilSupplyCountCrownRight_D23": 50,
-    "totalCounter_D1820": 125000,    # 프레스 총 타발수 (적당한 값)
-    "totalCounter_D1821": 125000,
-    "productionCounter_D1810": 10000,   # 목표 주생산량
-    "productionCounter_D1811": 10000,
-    "currentProduction_D1812": 8500,     # 현재까지 타발
-    "currentProduction_D1813": 8500,
-    "defficiencyQuantity_D1814": (-1500) & 0xFFFFFFFF,  # 생산계획-현재
-    "defficiencyQuantity_D1815": (-1500) & 0xFFFFFFFF,
-    "presetCounter_D1816": 5000,       # 목표 일생산량
-    "presetCounter_D1817": 5000,
-    "production_D1818": 0,
-    "production_D1819": 0,
-    "todayStrokeCount_D1912": 3200,   # 금일 행정수
-    "todayStrokeCount_D1913": 3200,
     "todayRunningTime_D1914": 480,    # 금일 기동시간(분) 8h
+}
+# Dword: 논리별 32bit 값. 각 변수는 16bit씩 저장되므로 D1820=하위, D1821=상위로 분할해 사용
+MEANINGFUL_DWORD = {
+    "totalCounter": 125000,           # 프레스 총 타발수
+    "productionCounter": 10000,       # 목표 주생산량
+    "currentProduction": 8500,        # 현재까지 타발
+    "defficiencyQuantity": (-1500) & 0xFFFFFFFF,  # 생산계획-현재
+    "presetCounter": 5000,            # 목표 일생산량
+    "production": 12345,              # 생산
+    "todayStrokeCount": 3200,         # 금일 행정수
 }
 
 
@@ -90,8 +86,18 @@ def build_string_groups(variables):
     return groups
 
 
+def _dword_base_and_index(name):
+    """xxx_D1820 → ('xxx', 1820). D번호 짝수=하위 16비트, 홀수=상위 16비트."""
+    if "_D" not in name:
+        return None, None
+    parts = name.rsplit("_D", 1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        return None, None
+    return parts[0], int(parts[1], 10)
+
+
 def get_meaningful_value(name, length_bits, data_type, scale, description):
-    """Boolean: 0/1, Word/Dword: 칼럼에 맞는 값, String: None(별도 처리)."""
+    """Boolean: 0/1, Word/Dword: 칼럼에 맞는 값( Dword는 16bit일 때 하위/상위 분할 ), String: None."""
     if data_type == "string":
         return None
     if data_type == "boolean":
@@ -101,9 +107,15 @@ def get_meaningful_value(name, length_bits, data_type, scale, description):
             return 0
         return 1 if "해제" in description or "진입" in description else 0
     if data_type == "word" and length_bits == 16:
-        return MEANINGFUL_WORD_DWORD.get(name, 0)
-    if data_type == "dword" and length_bits == 32:
-        return MEANINGFUL_WORD_DWORD.get(name, 0)
+        return MEANINGFUL_WORD.get(name, 0)
+    if data_type == "dword":
+        base, num = _dword_base_and_index(name)
+        full = MEANINGFUL_DWORD.get(base, 0) if base else 0
+        if length_bits == 16:
+            # 짝수 D = 하위 16비트, 홀수 D = 상위 16비트
+            return (full & 0xFFFF) if (num is not None and (num & 1) == 0) else ((full >> 16) & 0xFFFF)
+        if length_bits == 32:
+            return full
     return 0
 
 
@@ -174,8 +186,11 @@ def main():
     base_offset = {}
 
     bits = [0] * padding_bits
+    dword_sample = []
     for name, length_bits, data_type, scale, description in variables:
         value = get_meaningful_value(name, length_bits, data_type, scale, description)
+        if data_type == "dword" and length_bits == 16 and value is not None and len(dword_sample) < 6:
+            dword_sample.append((name, value))
         if data_type == "string":
             base = name.rsplit("_", 1)[0] if "_" in name else name
             off = base_offset.get(base, 0)
@@ -191,6 +206,11 @@ def main():
         else:
             bits.extend(bytes_to_bits_be(raw))
     payload = bits_to_bytes(bits)
+
+    if dword_sample:
+        print("Dword 샘플(전송값):", " | ".join(f"{n}={v}" for n, v in dword_sample))
+    print("io_variables:", IO_VARIABLES_PATH.resolve())
+    print("※ 화면에서 0으로 보이면: 1) 'UDP 파싱' 탭인지 확인 2) 백엔드에서 UDP 수신 시작 후 이 스크립트 실행")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     counter = 0

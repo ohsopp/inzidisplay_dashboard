@@ -101,10 +101,19 @@ def build_coil_values(coil_rows):
     return values
 
 
+def _dword_addr_number(addr):
+    """D1820 -> 1820. 앱과 동일하게 짝수 D=하위워드만 2레지스터 사용."""
+    if not addr or len(addr) < 2:
+        return None
+    try:
+        return int(addr[1:].strip(), 10)
+    except ValueError:
+        return None
+
+
 def build_register_values(reg_rows):
-    """Word/Dword/String 행에서 Holding Register 기본값 생성. 행당 Word=1, Dword=2, String=1 레지스터."""
+    """Word/Dword/String 행에서 Holding Register 생성. 앱(io_variables)과 동일하게 Dword는 논리당 2레지스터만."""
     values = []
-    # 금형 이름: 현재 8워드 = "hello", 다음 8워드 = "hello1" (각 2바이트씩 빅엔디안)
     current_name = (list("hello".encode("ascii")) + [0] * 11)[:16]
     next_name = (list("hello1".encode("ascii")) + [0] * 10)[:16]
     string_row_index = 0
@@ -112,6 +121,9 @@ def build_register_values(reg_rows):
         if dt == "word":
             values.append(REG_DEFAULTS.get(addr, 0) & 0xFFFF)
         elif dt == "dword":
+            num = _dword_addr_number(addr)
+            if num is not None and (num & 1) == 1:
+                continue  # 상위 워드 행(D1821 등) 스킵 → 논리당 2레지스터만 (앱과 동일)
             v = REG_DEFAULTS.get(addr, 0) & 0xFFFFFFFF
             values.append((v >> 16) & 0xFFFF)
             values.append(v & 0xFFFF)
@@ -126,32 +138,32 @@ def build_register_values(reg_rows):
     return values
 
 
-# 시뮬레이션: 경고등 자주 랜덤 점등, 카운터/생산량/타발/가동은 전부 +1 쌓였다가 상한 넘으면 복귀
-COIL_FLASH_INTERVAL = 0.6
-COIL_FLASH_DURATION = 0.4
-REG_PULSE_INTERVAL = 0.5
+# 시뮬레이션: 경고등 자주 랜덤 점등. 타발수만 200ms마다 +1, 나머지 카운터/기동시간은 1초마다.
+COIL_FLASH_INTERVAL = 0.25
+COIL_FLASH_DURATION = 0.15
+STROKE_PULSE_INTERVAL = 0.2   # 타발수(totalCounter)만 200ms마다 +1
+REG_PULSE_INTERVAL = 1.0      # 그 외 카운터/기동시간 +1 주기 1초
 REG_PULSE_CAP = 150
 
-# iolist 기준 바뀌어야 하는 항목 전부 (시작 인덱스, 레지스터 개수). 정적(금형번호/이름/온도 등) 제외
-# 토탈카운터 D1820,D1821 / 생산계획 D1810,D1811 / 현재생산량 D1812,D1813 / 과부족 D1814,D1815 /
-# 설정카운터 D1816,D1817 / 카운트수량 D1818,D1819 / 금일 가동수량 D1912,D1913 / 금일 가동시간 D1914
+# 타발수: 인덱스 35,36 (totalCounter_D1820). 나머지는 REG_PULSE_SPECS로 1초마다.
+STROKE_PULSE_SPEC = (35, 2)
 REG_PULSE_SPECS = [
-    (35, 2), (37, 2),   # 토탈카운터
-    (39, 2), (41, 2),   # 생산계획량
-    (43, 2), (45, 2),   # 현재생산량
-    (47, 2), (49, 2),   # 과부족수량
-    (51, 2), (53, 2),   # 설정카운터
-    (55, 2), (57, 2),   # 카운트수량
-    (59, 2), (61, 2),   # 금일 가동수량
-    (63, 1),            # 금일 가동시간
+    (37, 2),   # productionCounter_D1810
+    (39, 2),   # currentProduction_D1812
+    (41, 2),   # defficiencyQuantity_D1814
+    (43, 2),   # presetCounter_D1816
+    (45, 2),   # production_D1818
+    (47, 2),   # todayStrokeCount_D1912
+    (49, 1),   # todayRunningTime_D1914 (기동시간)
 ]
 
 
 def _simulation_loop(co_block, hr_block, coil_base, reg_base_snapshot, stop_event):
-    """코일: 랜덤 점등 후 복귀. 레지스터: 바뀌어야 하는 항목 전부 매 틱 +1, 상한 넘으면 복귀."""
+    """코일: 랜덤 점등 후 복귀. 타발수만 200ms마다 +1, 나머지 레지스터는 1초마다 +1."""
     coil_vals = co_block.values
     reg_vals = hr_block.values
     last_coil_flash = 0.0
+    last_stroke_pulse = 0.0
     last_reg_pulse = 0.0
     flashed_coil_idx = None
     flashed_coil_restore_at = 0.0
@@ -167,7 +179,27 @@ def _simulation_loop(co_block, hr_block, coil_base, reg_base_snapshot, stop_even
             coil_vals[idx] = 1
             flashed_coil_idx = idx
             flashed_coil_restore_at = now + COIL_FLASH_DURATION
-        # 바뀌어야 하는 레지스터 전부 매 틱 +1
+        # 타발수(totalCounter)만 200ms마다 +1 (블록 주소 = 1부터이므로 start+1)
+        if (now - last_stroke_pulse) >= STROKE_PULSE_INTERVAL:
+            last_stroke_pulse = now
+            start, count = STROKE_PULSE_SPEC
+            if start + count <= len(reg_vals):
+                base_hi = reg_base_snapshot[start]
+                base_lo = reg_base_snapshot[start + 1]
+                v = (reg_vals[start] << 16) | (reg_vals[start + 1] & 0xFFFF)
+                base_v = (base_hi << 16) | (base_lo & 0xFFFF)
+                v = (v + 1) & 0xFFFFFFFF
+                if v >= base_v + REG_PULSE_CAP:
+                    v = base_v
+                hi, lo = (v >> 16) & 0xFFFF, v & 0xFFFF
+                reg_vals[start] = hi
+                reg_vals[start + 1] = lo
+                # pymodbus 블록이 주소 1부터이므로 setValues(start+1, ...)로도 반영
+                try:
+                    hr_block.setValues(start + 1, [hi, lo])
+                except Exception:
+                    pass
+        # 그 외 카운터/기동시간은 1초마다 +1
         if (now - last_reg_pulse) >= REG_PULSE_INTERVAL:
             last_reg_pulse = now
             for start, count in REG_PULSE_SPECS:
@@ -188,7 +220,7 @@ def _simulation_loop(co_block, hr_block, coil_base, reg_base_snapshot, stop_even
                     if v >= (base_hi + REG_PULSE_CAP) & 0xFFFF:
                         v = base_hi
                     reg_vals[start] = v
-        time.sleep(0.1)
+        time.sleep(0.02)  # 20ms 주기로 체크해 200ms 타발수 타이밍 정확히
 
 
 def main():

@@ -61,7 +61,8 @@ def _reg_count_for_entry(info):
         return 1
     if dt == "word" and length == 16:
         return 1
-    if dt == "dword" and length == 32:
+    # Dword: PLC는 하위워드(저주소)+상위워드(고주소) 16비트씩 2레지스터로 저장
+    if dt == "dword":
         return 2
     if dt == "string" and length == 128:
         return 8
@@ -81,6 +82,16 @@ def _parse_plc_device(plc_device):
             except ValueError:
                 return None, None
     return None, None
+
+
+def _dword_half_name_to_base_and_index(name):
+    """xxx_D1820 → ('xxx', 1820). Dword 16bit 쌍 병합 시 사용. 짝수 D=하위, 홀수 D=상위."""
+    if "_D" not in name:
+        return None, None
+    parts = name.rsplit("_D", 1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        return None, None
+    return parts[0], int(parts[1], 10)
 
 
 def resolve_address(name, info, options, legacy_coil_index, legacy_reg_start):
@@ -112,6 +123,9 @@ def resolve_address(name, info, options, legacy_coil_index, legacy_reg_start):
                     addr += options.get("input_reg_offset", 0)
                 elif modbus_type == "discrete":
                     addr += options.get("discrete_offset", 0)
+                # Dword: 홀수 주소는 짝수 쌍부터 2레지스터 읽도록 정규화
+                if dt == "dword" and count == 2 and (addr & 1):
+                    addr -= 1
                 return modbus_type, addr, count
             return modbus_type or "holding", addr, count
 
@@ -132,6 +146,9 @@ def resolve_address(name, info, options, legacy_coil_index, legacy_reg_start):
                 addr += options.get("input_reg_offset", 0)
             elif modbus_type == "discrete":
                 addr += options.get("discrete_offset", 0)
+            # Dword: 홀수 주소(D1811 등)는 짝수 쌍(D1810)부터 2레지스터 읽도록 정규화
+            if dt == "dword" and count == 2 and (addr & 1):
+                addr -= 1
             return modbus_type, addr, count
 
     # 레거시: Boolean 1bit -> coil 순서, 나머지 -> holding 연속
@@ -144,9 +161,10 @@ def resolve_address(name, info, options, legacy_coil_index, legacy_reg_start):
 
 def build_full_map(entries, options):
     """
-    전체 매핑 생성. (name, info, modbus_type, addr, count) 리스트.
+    전체 매핑 생성. (name_or_names, info, modbus_type, addr, count) 리스트.
+    name_or_names: 단일 변수면 str, Dword 16+16 쌍이면 (name_low, name_high) 튜플.
     레거시 호환: 아무 엔트리도 modbusType/modbusAddr/plcDevice 없으면 coil 0~106, holding 0~N 연속.
-    하나라도 있으면 주소 없는 엔트리는 스킵(현장에서 전부 주소 채우면 됨).
+    Dword는 io_variables에서 16bit 두 항목(xxx_D1820, xxx_D1821)으로 있으면 한 쌍으로 읽어 두 이름에 동일 값 설정.
     """
     has_explicit = any(
         "modbusType" in info or "modbusAddr" in info or info.get("plcDevice")
@@ -155,10 +173,14 @@ def build_full_map(entries, options):
     result = []
     coil_index = 0
     reg_start = 0
-    for name, info in entries:
+    i = 0
+    while i < len(entries):
+        name, info = entries[i]
         if has_explicit and not ("modbusType" in info or "modbusAddr" in info or info.get("plcDevice")):
+            i += 1
             continue
         dt = (info.get("dataType") or "").strip().lower()
+        length = int(info.get("length", 0))
         count = _reg_count_for_entry(info)
         use_legacy_coil = (
             dt == "boolean"
@@ -172,10 +194,36 @@ def build_full_map(entries, options):
         if use_legacy_coil and coil_index < LEGACY_COIL_MAX:
             result.append((name, info, "coil", coil_index, 1))
             coil_index += 1
+            i += 1
             continue
         if use_legacy_reg:
+            # Dword 16+16 쌍: 같은 base, 연속 D(짝수→홀수)면 한 번에 2레지스터 읽고 두 이름에 값 설정
+            if dt == "dword" and length == 16:
+                base, d_num = _dword_half_name_to_base_and_index(name)
+                next_entry = entries[i + 1] if i + 1 < len(entries) else None
+                if base is not None and (d_num & 1) == 0 and next_entry:
+                    next_name, next_info = next_entry
+                    next_dt = (next_info.get("dataType") or "").strip().lower()
+                    next_len = int(next_info.get("length", 0))
+                    next_base, next_d = _dword_half_name_to_base_and_index(next_name)
+                    if (
+                        next_dt == "dword"
+                        and next_len == 16
+                        and next_base == base
+                        and next_d == d_num + 1
+                    ):
+                        merged_info = {**info, "length": 32}
+                        result.append(((name, next_name), merged_info, "holding", reg_start, 2))
+                        reg_start += 2
+                        i += 2
+                        continue
+                if base is not None and (d_num & 1) == 1:
+                    # 상위 워드 단독 엔트리: 이미 앞에서 쌍으로 처리됐으므로 스킵
+                    i += 1
+                    continue
             result.append((name, info, "holding", reg_start, count))
             reg_start += count
+            i += 1
             continue
 
         modbus_type, addr, c = resolve_address(
@@ -189,6 +237,7 @@ def build_full_map(entries, options):
                 coil_index = max(coil_index, addr + 1)
             elif modbus_type == "holding":
                 reg_start = max(reg_start, addr + c)
+        i += 1
     return result
 
 
@@ -279,6 +328,7 @@ def decode_value(info, raw_regs=None, raw_bits=None):
             v -= 0x10000
         return round(v * scale, 4) if scale != 1 else v
     if dt == "dword" and len(raw_regs) >= 2:
+        # Modbus 일반: 첫 레지스터=상위 16비트, 둘째=하위 16비트 (빅엔디안)
         v = ((raw_regs[0] & 0xFFFF) << 16) | (raw_regs[1] & 0xFFFF)
         if v >= 0x80000000:
             v -= 0x100000000

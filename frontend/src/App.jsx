@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import './App.css'
 
 // 개발 모드: 접속한 호스트(로컬/원격)의 6005 사용 → SSH로 서버 IP 접속해도 API 연결됨
@@ -153,14 +153,13 @@ function decodeForDisplay(raw, info) {
     const num = typeof raw === 'number' ? raw : parseInt(raw, 10)
     if (Number.isNaN(num)) return '-'
     const u = toUnsigned(num, len)
-    // unsigned로 표시하되, signed로 음수면 절댓값으로 보여줌 (예: 4294965796 → 1500)
     let display = u
     if (len === 16) {
       const s = (u & 0xFFFF) << 16 >> 16
-      if (s < 0) display = -s
+      if (s < 0) display = 0
     } else if (len === 32) {
       const s = (u >>> 0) | 0
-      if (s < 0) display = -s
+      if (s < 0) display = 0
     }
     if (scaleNum === 0.1) return (display * 0.1).toFixed(1)
     return display
@@ -187,6 +186,94 @@ function decodeForDisplay(raw, info) {
   return raw
 }
 
+/** Dword 쌍·String 연속(같은 이름 + 연속 D주소)을 한 행으로 묶은 표시용 리스트. */
+function buildDisplayVariableList(ioVariableList) {
+  const result = []
+  for (let i = 0; i < ioVariableList.length; i++) {
+    const [name, info] = ioVariableList[i]
+    const dt = (info?.dataType ?? '').toLowerCase()
+    const len = Number(info?.length) || 0
+    const next = ioVariableList[i + 1]
+    const nextName = next?.[0]
+    const nextInfo = next?.[1]
+    const nextDt = (nextInfo?.dataType ?? '').toLowerCase()
+    const nextLen = Number(nextInfo?.length) || 0
+    // Dword: 연속 2개(16+16) → 한 행
+    if (dt === 'dword' && len === 16 && nextDt === 'dword' && nextLen === 16) {
+      const m = name.match(/^(.+)_D(\d+)$/)
+      const n = nextName && nextName.match(/^(.+)_D(\d+)$/)
+      if (m && n && m[1] === n[1] && parseInt(n[2], 10) === parseInt(m[2], 10) + 1) {
+        result.push({
+          name,
+          keys: [name, nextName],
+          info: { ...info, length: 32 }
+        })
+        i++
+        continue
+      }
+    }
+    // String: 같은 접두어 + 연속 D주소 전부 → 한 행 (예: nextDieName_D549~D556)
+    if (dt === 'string' && len === 16) {
+      const m = name.match(/^(.+)_D(\d+)$/)
+      if (m) {
+        const prefix = m[1]
+        let lastNum = parseInt(m[2], 10)
+        const keys = [name]
+        let j = i + 1
+        while (j < ioVariableList.length) {
+          const [nName, nInfo] = ioVariableList[j]
+          const nDt = (nInfo?.dataType ?? '').toLowerCase()
+          const nLen = Number(nInfo?.length) || 0
+          if (nDt !== 'string' || nLen !== 16) break
+          const nm = nName.match(/^(.+)_D(\d+)$/)
+          if (!nm || nm[1] !== prefix || parseInt(nm[2], 10) !== lastNum + 1) break
+          keys.push(nName)
+          lastNum = parseInt(nm[2], 10)
+          j++
+        }
+        if (keys.length > 1) {
+          result.push({
+            name,
+            keys,
+            info: { ...info, length: 16 * keys.length }
+          })
+          i = j - 1
+          continue
+        }
+      }
+    }
+    result.push({ name, keys: [name], info })
+  }
+  return result
+}
+
+/** 표시용 행의 값 (Modbus: 첫 키에 이미 결합값이 있음, UDP: 두 키를 하위|상위로 결합. String 병합: 여러 키의 hex/문자열 이어붙임) */
+function getDisplayValue(row, valueMap, source = 'modbus') {
+  if (row.keys.length === 1) return valueMap[row.name]
+  const dt = (row.info?.dataType ?? '').toLowerCase()
+  // String 병합: 각 키 값(hex 또는 2바이트)을 이어붙여 한 문자열로
+  if (dt === 'string') {
+    let combined = ''
+    for (const k of row.keys) {
+      const v = valueMap[k]
+      if (v === undefined || v === null || v === '-') continue
+      if (typeof v === 'string' && /^[0-9a-fA-F]*$/.test(v)) combined += v.replace(/\s/g, '')
+      else if (typeof v === 'number') combined += (v & 0xFFFF).toString(16).padStart(4, '0')
+    }
+    return combined || undefined
+  }
+  // Dword
+  if (source === 'modbus') return valueMap[row.keys[0]]
+  const low = valueMap[row.keys[0]]
+  const high = valueMap[row.keys[1]]
+  const l = typeof low === 'number' ? low : parseInt(low, 10)
+  const h = typeof high === 'number' ? high : parseInt(high, 10)
+  if (Number.isNaN(l) && Number.isNaN(h)) return undefined
+  if (Number.isNaN(h)) return low
+  if (Number.isNaN(l)) return high
+  return ((h & 0xFFFF) << 16) | (l & 0xFFFF)
+}
+
 function App() {
   const [ip, setIp] = useState('0.0.0.0')
   const [port, setPort] = useState('5212')
@@ -211,9 +298,9 @@ function App() {
   const [modbusHost, setModbusHost] = useState('127.0.0.1')
   const [modbusPort, setModbusPort] = useState('5051')
   const [modbusSlaveId, setModbusSlaveId] = useState('0')
-  const [modbusPollIntervals, setModbusPollIntervals] = useState({ boolean_ms: 3000, data_ms: 1000, string_ms: 5000 })
+  const [modbusPollIntervals, setModbusPollIntervals] = useState({ boolean_ms: 500, data_ms: 500, string_ms: 5000 })
   const [modbusPollSettingsOpen, setModbusPollSettingsOpen] = useState(false)
-  const [modbusPollEdit, setModbusPollEdit] = useState({ boolean_ms: 3000, data_ms: 1000, string_ms: 5000 })
+  const [modbusPollEdit, setModbusPollEdit] = useState({ boolean_ms: 500, data_ms: 500, string_ms: 5000 })
   const [modbusPollUnits, setModbusPollUnits] = useState({ boolean: 'ms', data: 'ms', string: 'ms' })
   const [modbusPollError, setModbusPollError] = useState('')
 
@@ -231,8 +318,31 @@ function App() {
   const eventSourceRef = useRef(null)
   const ioVariableListRef = useRef([])
   const parsedEndianModeRef = useRef('1')
+  /** 타발수 등: 리셋(음수) 시 처음 보였던 시작값으로 표시 (예: 10000 시작 → 리셋 시 10000) */
+  const counterStartRef = useRef({})
   ioVariableListRef.current = ioVariableList
   parsedEndianModeRef.current = parsedEndianMode
+
+  /** Word/Dword: 음수(리셋)일 때 처음 본 값을 시작값으로 저장해 두고, 리셋 시 그 시작값으로 표시 */
+  const decodeForDisplayWithReset = (raw, info, rowName) => {
+    const dt = (info?.dataType ?? '').toLowerCase()
+    const isCounter = dt === 'word' || dt === 'dword'
+    const num = typeof raw === 'number' ? raw : parseInt(raw, 10)
+    if (isCounter && typeof raw === 'number' && num >= 0 && counterStartRef.current[rowName] === undefined) {
+      counterStartRef.current[rowName] = raw
+    }
+    if (isCounter && typeof raw === 'number' && num < 0) {
+      const startRaw = counterStartRef.current[rowName]
+      return startRaw !== undefined ? decodeForDisplay(startRaw, info) : decodeForDisplay(raw, info)
+    }
+    return decodeForDisplay(raw, info)
+  }
+
+  /** Dword 쌍 합쳐서 한 행으로 보여줄 목록 (Modbus/UDP 테이블용) */
+  const displayVariableList = useMemo(
+    () => buildDisplayVariableList(ioVariableList),
+    [ioVariableList]
+  )
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -447,8 +557,8 @@ function App() {
       if (res.ok) {
         const data = await res.json()
         setModbusPollIntervals({
-          boolean_ms: Number(data.boolean_ms) || 3000,
-          data_ms: Number(data.data_ms) || 1000,
+          boolean_ms: Number(data.boolean_ms) || 500,
+          data_ms: Number(data.data_ms) || 500,
           string_ms: Number(data.string_ms) || 5000,
         })
       }
@@ -470,8 +580,8 @@ function App() {
 
   const handleModbusPollIntervalsSave = async (boolean_ms, data_ms, string_ms) => {
     const payload = {
-      boolean_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(boolean_ms) || 3000)),
-      data_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(data_ms) || 1000)),
+      boolean_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(boolean_ms) || 500)),
+      data_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(data_ms) || 500)),
       string_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(string_ms) || 5000)),
     }
     try {
@@ -483,8 +593,8 @@ function App() {
       const data = await res.json().catch(() => ({}))
       if (res.ok && data && (typeof data.boolean_ms === 'number' || typeof data.boolean_ms === 'string')) {
         setModbusPollIntervals({
-          boolean_ms: Number(data.boolean_ms) || 3000,
-          data_ms: Number(data.data_ms) || 1000,
+          boolean_ms: Number(data.boolean_ms) || 500,
+          data_ms: Number(data.data_ms) || 500,
           string_ms: Number(data.string_ms) || 5000,
         })
         setModbusPollSettingsOpen(false)
@@ -943,7 +1053,7 @@ function App() {
                 </div>
               </div>
               <div className="parsed-view-body">
-                {ioVariableList.length === 0 ? (
+                {displayVariableList.length === 0 ? (
                   <p className="parsed-view-empty">io_variables.json을 불러오는 중…</p>
                 ) : (
                   <div className="parsed-vars-grid">
@@ -985,7 +1095,10 @@ function App() {
                         </div>
                       )}
                     </div>
-                    {ioVariableList.map(([name, info]) => (
+                    {displayVariableList.map((row) => {
+                      const value = getDisplayValue(row, modbusValues, 'modbus')
+                      const { name, info } = row
+                      return (
                       <div
                         key={name}
                         className="parsed-var-row"
@@ -1001,21 +1114,21 @@ function App() {
                       >
                         <span className="parsed-var-name" title={name}>{name}</span>
                         {showBitsCol && (
-                          <span className="parsed-var-bits" title={formatParsedValueAsBits(modbusValues[name], info.length, info.dataType, false)}>
-                            {formatParsedValueAsBits(modbusValues[name], info.length, info.dataType, false)}
+                          <span className="parsed-var-bits" title={formatParsedValueAsBits(value, info.length, info.dataType, false)}>
+                            {formatParsedValueAsBits(value, info.length, info.dataType, false)}
                           </span>
                         )}
                         {showHexCol && (
-                          <span className="parsed-var-hex" title={formatParsedValueAsHex(modbusValues[name], info.length, false)}>
-                            {formatParsedValueAsHex(modbusValues[name], info.length, false)}
+                          <span className="parsed-var-hex" title={formatParsedValueAsHex(value, info.length, false)}>
+                            {formatParsedValueAsHex(value, info.length, false)}
                           </span>
                         )}
                         {showValueCol && (
                           <span className="parsed-var-value-wrap">
                             {(info.dataType || '').toLowerCase() === 'boolean' && (
-                              <span className={`boolean-dot boolean-dot--${modbusValues[name] ? '1' : '0'}`} title={modbusValues[name] ? '1' : '0'} aria-hidden />
+                              <span className={`boolean-dot boolean-dot--${value ? '1' : '0'}`} title={value ? '1' : '0'} aria-hidden />
                             )}
-                            <span className="parsed-var-value">{decodeForDisplay(modbusValues[name], info)}</span>
+                            <span className="parsed-var-value">{decodeForDisplayWithReset(value, info, name)}</span>
                           </span>
                         )}
                         {(showMetaBit || showMetaType || showMetaDesc) && (
@@ -1036,7 +1149,7 @@ function App() {
                           </div>
                         )}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>
@@ -1167,7 +1280,7 @@ function App() {
                 </div>
               </div>
               <div className="parsed-view-body">
-                {ioVariableList.length === 0 ? (
+                {displayVariableList.length === 0 ? (
                   <p className="parsed-view-empty">io_variables.json을 불러오는 중…</p>
                 ) : (
                   <div className="parsed-vars-grid">
@@ -1209,7 +1322,10 @@ function App() {
                         </div>
                       )}
                     </div>
-                    {ioVariableList.map(([name, info]) => (
+                    {displayVariableList.map((row) => {
+                      const value = getDisplayValue(row, parsedValues, 'udp')
+                      const { name, info } = row
+                      return (
                       <div
                         key={name}
                         className="parsed-var-row"
@@ -1225,21 +1341,21 @@ function App() {
                       >
                         <span className="parsed-var-name" title={name}>{name}</span>
                         {showBitsCol && (
-                          <span className="parsed-var-bits" title={formatParsedValueAsBits(parsedValues[name], info.length, info.dataType, getParseOptionsFromMode(parsedEndianMode).littleEndian)}>
-                            {formatParsedValueAsBits(parsedValues[name], info.length, info.dataType, getParseOptionsFromMode(parsedEndianMode).littleEndian)}
+                          <span className="parsed-var-bits" title={formatParsedValueAsBits(value, info.length, info.dataType, getParseOptionsFromMode(parsedEndianMode).littleEndian)}>
+                            {formatParsedValueAsBits(value, info.length, info.dataType, getParseOptionsFromMode(parsedEndianMode).littleEndian)}
                           </span>
                         )}
                         {showHexCol && (
-                          <span className="parsed-var-hex" title={formatParsedValueAsHex(parsedValues[name], info.length, getParseOptionsFromMode(parsedEndianMode).littleEndian)}>
-                            {formatParsedValueAsHex(parsedValues[name], info.length, getParseOptionsFromMode(parsedEndianMode).littleEndian)}
+                          <span className="parsed-var-hex" title={formatParsedValueAsHex(value, info.length, getParseOptionsFromMode(parsedEndianMode).littleEndian)}>
+                            {formatParsedValueAsHex(value, info.length, getParseOptionsFromMode(parsedEndianMode).littleEndian)}
                           </span>
                         )}
                         {showValueCol && (
                           <span className="parsed-var-value-wrap">
                             {(info.dataType || '').toLowerCase() === 'boolean' && (
-                              <span className={`boolean-dot boolean-dot--${parsedValues[name] ? '1' : '0'}`} title={parsedValues[name] ? '1' : '0'} aria-hidden />
+                              <span className={`boolean-dot boolean-dot--${value ? '1' : '0'}`} title={value ? '1' : '0'} aria-hidden />
                             )}
-                            <span className="parsed-var-value">{decodeForDisplay(parsedValues[name], info)}</span>
+                            <span className="parsed-var-value">{decodeForDisplayWithReset(value, info, name)}</span>
                           </span>
                         )}
                         {(showMetaBit || showMetaType || showMetaDesc) && (
@@ -1260,7 +1376,7 @@ function App() {
                           </div>
                         )}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>
