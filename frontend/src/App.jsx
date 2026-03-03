@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
 
-const API_URL = import.meta.env.DEV ? 'http://localhost:6005' : window.location.origin
+// 개발 모드: 접속한 호스트(로컬/원격)의 6005 사용 → SSH로 서버 IP 접속해도 API 연결됨
+const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : window.location.origin
 
 function hexToBytes(hex) {
   const s = String(hex).replace(/\s/g, '')
@@ -210,6 +211,19 @@ function App() {
   const [modbusHost, setModbusHost] = useState('127.0.0.1')
   const [modbusPort, setModbusPort] = useState('5051')
   const [modbusSlaveId, setModbusSlaveId] = useState('0')
+  const [modbusPollIntervals, setModbusPollIntervals] = useState({ boolean_ms: 3000, data_ms: 1000, string_ms: 5000 })
+  const [modbusPollSettingsOpen, setModbusPollSettingsOpen] = useState(false)
+  const [modbusPollEdit, setModbusPollEdit] = useState({ boolean_ms: 3000, data_ms: 1000, string_ms: 5000 })
+  const [modbusPollUnits, setModbusPollUnits] = useState({ boolean: 'ms', data: 'ms', string: 'ms' })
+  const [modbusPollError, setModbusPollError] = useState('')
+
+  const POLL_MIN_MS = 200
+  const POLL_MAX_MS = 1800000
+  const toDisplay = (ms, unit) => (unit === 's' ? ms / 1000 : ms)
+  const fromInput = (val, unit) => {
+    const n = unit === 's' ? Math.round(parseFloat(val) * 1000) : parseInt(val, 10)
+    return Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number.isNaN(n) ? POLL_MIN_MS : n))
+  }
   const [sensorData, setSensorData] = useState({}) // { VVB001: { value, ts }, TP3237: { value, ts } }
   const [mqttConnected, setMqttConnected] = useState(false)
   const [mqttError, setMqttError] = useState('')
@@ -424,6 +438,62 @@ function App() {
       await fetch(`${API_URL}/api/modbus/disconnect`, { method: 'POST' })
     } catch {
       // ignore
+    }
+  }
+
+  const fetchModbusPollIntervals = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/modbus/poll-intervals`)
+      if (res.ok) {
+        const data = await res.json()
+        setModbusPollIntervals({
+          boolean_ms: Number(data.boolean_ms) || 3000,
+          data_ms: Number(data.data_ms) || 1000,
+          string_ms: Number(data.string_ms) || 5000,
+        })
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    if (activeView === 'modbus') fetchModbusPollIntervals()
+  }, [activeView])
+
+  useEffect(() => {
+    if (modbusPollSettingsOpen) {
+      setModbusPollEdit({ ...modbusPollIntervals })
+      setModbusPollError('')
+    }
+  }, [modbusPollSettingsOpen])
+
+  const handleModbusPollIntervalsSave = async (boolean_ms, data_ms, string_ms) => {
+    const payload = {
+      boolean_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(boolean_ms) || 3000)),
+      data_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(data_ms) || 1000)),
+      string_ms: Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Number(string_ms) || 5000)),
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/modbus/poll-intervals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data && (typeof data.boolean_ms === 'number' || typeof data.boolean_ms === 'string')) {
+        setModbusPollIntervals({
+          boolean_ms: Number(data.boolean_ms) || 3000,
+          data_ms: Number(data.data_ms) || 1000,
+          string_ms: Number(data.string_ms) || 5000,
+        })
+        setModbusPollSettingsOpen(false)
+        setModbusPollError('')
+      } else {
+        setModbusPollError(data?.error || '저장 실패. 백엔드를 재시작한 뒤 다시 시도하세요.')
+      }
+    } catch (err) {
+      setModbusPollError('서버에 연결할 수 없습니다. 백엔드(6005)가 켜져 있는지 확인하세요.')
     }
   }
 
@@ -696,6 +766,18 @@ function App() {
               <div className="parsed-view-header">
                 <div className="parsed-view-title-row">
                   <h2>Modbus TCP</h2>
+                  <button
+                    type="button"
+                    className="modbus-poll-settings-btn"
+                    onClick={() => setModbusPollSettingsOpen(true)}
+                    title="폴링 간격 설정"
+                    aria-label="폴링 간격 설정"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                  </button>
                 </div>
                 <section className="control-panel modbus-control">
                   <div className="control-row">
@@ -754,9 +836,100 @@ function App() {
                     </button>
                   </div>
                   {modbusError && <p className="error-message">{modbusError}</p>}
-                  {modbusConnected && <p className="modbus-status">경고등/알람(Boolean) 3초 간격, 데이터 1초 간격 폴링 중</p>}
+                  {modbusConnected && (
+                    <p className="modbus-status">
+                      경고등/알람(Boolean) {modbusPollIntervals.boolean_ms}ms 간격, 데이터 {modbusPollIntervals.data_ms}ms 간격, 금형이름 {modbusPollIntervals.string_ms}ms 간격 폴링 중
+                    </p>
+                  )}
                 </section>
-                <p className="parsed-view-hint">io_variables.json과 동일한 목록. Coil 0~106(Boolean) 3초 간격, Holding Registers 1초 간격.</p>
+                <p className="parsed-view-hint">
+                  io_variables.json과 동일한 목록. Boolean(Coil) {modbusPollIntervals.boolean_ms}ms, 데이터(Holding 등) {modbusPollIntervals.data_ms}ms, 금형이름(String) {modbusPollIntervals.string_ms}ms 간격.
+                </p>
+                {modbusPollSettingsOpen && (
+                  <div className="modbus-poll-modal-overlay" onClick={() => setModbusPollSettingsOpen(false)}>
+                    <div className="modbus-poll-modal" onClick={(e) => e.stopPropagation()}>
+                      <h3>폴링 간격 설정</h3>
+                      <p className="modbus-poll-modal-desc">각 구간별 폴링 주기. 최소 200ms, 최대 30분. 단위는 각각 ms/s 드롭다운으로 선택.</p>
+                      {modbusPollError && <p className="modbus-poll-modal-error">{modbusPollError}</p>}
+                      <div className="modbus-poll-modal-fields">
+                        <div className="field-group">
+                          <label>경고등/알람 (Boolean)</label>
+                          <span className="modbus-poll-input-wrap">
+                            <input
+                              type="number"
+                              min={modbusPollUnits.boolean === 's' ? 0.2 : 200}
+                              max={modbusPollUnits.boolean === 's' ? 1800 : 1800000}
+                              step={modbusPollUnits.boolean === 's' ? 0.1 : 100}
+                              value={toDisplay(modbusPollEdit.boolean_ms, modbusPollUnits.boolean)}
+                              onChange={(e) => setModbusPollEdit((p) => ({ ...p, boolean_ms: fromInput(e.target.value, modbusPollUnits.boolean) }))}
+                            />
+                            <select
+                              className="modbus-poll-unit-select"
+                              value={modbusPollUnits.boolean}
+                              onChange={(e) => setModbusPollUnits((u) => ({ ...u, boolean: e.target.value }))}
+                              aria-label="Boolean 단위"
+                            >
+                              <option value="ms">ms</option>
+                              <option value="s">s</option>
+                            </select>
+                          </span>
+                        </div>
+                        <div className="field-group">
+                          <label>데이터 (타발수 등)</label>
+                          <span className="modbus-poll-input-wrap">
+                            <input
+                              type="number"
+                              min={modbusPollUnits.data === 's' ? 0.2 : 200}
+                              max={modbusPollUnits.data === 's' ? 1800 : 1800000}
+                              step={modbusPollUnits.data === 's' ? 0.1 : 100}
+                              value={toDisplay(modbusPollEdit.data_ms, modbusPollUnits.data)}
+                              onChange={(e) => setModbusPollEdit((p) => ({ ...p, data_ms: fromInput(e.target.value, modbusPollUnits.data) }))}
+                            />
+                            <select
+                              className="modbus-poll-unit-select"
+                              value={modbusPollUnits.data}
+                              onChange={(e) => setModbusPollUnits((u) => ({ ...u, data: e.target.value }))}
+                              aria-label="데이터 단위"
+                            >
+                              <option value="ms">ms</option>
+                              <option value="s">s</option>
+                            </select>
+                          </span>
+                        </div>
+                        <div className="field-group">
+                          <label>금형이름 (String)</label>
+                          <span className="modbus-poll-input-wrap">
+                            <input
+                              type="number"
+                              min={modbusPollUnits.string === 's' ? 0.2 : 200}
+                              max={modbusPollUnits.string === 's' ? 1800 : 1800000}
+                              step={modbusPollUnits.string === 's' ? 0.1 : 100}
+                              value={toDisplay(modbusPollEdit.string_ms, modbusPollUnits.string)}
+                              onChange={(e) => setModbusPollEdit((p) => ({ ...p, string_ms: fromInput(e.target.value, modbusPollUnits.string) }))}
+                            />
+                            <select
+                              className="modbus-poll-unit-select"
+                              value={modbusPollUnits.string}
+                              onChange={(e) => setModbusPollUnits((u) => ({ ...u, string: e.target.value }))}
+                              aria-label="금형이름 단위"
+                            >
+                              <option value="ms">ms</option>
+                              <option value="s">s</option>
+                            </select>
+                          </span>
+                        </div>
+                      </div>
+                      <div className="modbus-poll-modal-actions">
+                        <button type="button" className="btn btn-primary" onClick={() => handleModbusPollIntervalsSave(modbusPollEdit.boolean_ms, modbusPollEdit.data_ms, modbusPollEdit.string_ms)}>
+                          적용
+                        </button>
+                        <button type="button" className="btn" onClick={() => setModbusPollSettingsOpen(false)}>
+                          취소
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="parsed-meta-toolbar">
                   <span className="parsed-meta-toolbar-label">표시 열</span>
                   <div className="parsed-meta-toolbar-checks">

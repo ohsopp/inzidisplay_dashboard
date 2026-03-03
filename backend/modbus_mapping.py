@@ -17,6 +17,9 @@ MODBUS_OPTIONS_PATH = (REPO_ROOT / "modbus_options.json") if _BUNDLE_ROOT else (
 # 기존 폴러와 호환: Boolean 최대 개수(Coil), 나머지는 Holding 연속
 LEGACY_COIL_MAX = 107
 
+# 한 번에 읽는 최대 개수 (연속 주소만 묶고, 구간 끊기거나 이 개수 초과 시 블록 분리)
+MAX_REGISTERS_OR_COILS_PER_READ = 125
+
 
 def load_options():
     """modbus_options.json 로드. 없으면 기본값."""
@@ -189,29 +192,34 @@ def build_full_map(entries, options):
     return result
 
 
+def _is_string_entry(info):
+    return (info.get("dataType") or "").strip().lower() == "string"
+
+
 def build_read_blocks(full_map):
     """
     (name, info, type, addr, count) 리스트를 읽기 최적 블록으로 묶음.
-    반환: { "coil": [ (start, count, [(name, info, addr, count), ...]), ... ],
-            "holding": [ ... ], "input_reg": [...], "discrete": [...] }
+    coil/discrete: 그대로. holding/input_reg: data vs string 분리(금형 이름 등).
+    반환: coil, discrete, holding_data, holding_string, input_reg_data, input_reg_string
     """
     by_type = {}
     for name, info, mtype, addr, count in full_map:
         by_type.setdefault(mtype, []).append((name, info, addr, count))
 
-    out = {}
-    for mtype, tags in by_type.items():
+    def merge_blocks(tags):
         if not tags:
-            continue
+            return []
         sorted_tags = sorted(tags, key=lambda t: t[2])
         blocks = []
         cur_start = sorted_tags[0][2]
         cur_end = cur_start + sorted_tags[0][3]
         cur_list = [sorted_tags[0]]
-
         for name, info, addr, count in sorted_tags[1:]:
-            if addr <= cur_end:
-                cur_end = max(cur_end, addr + count)
+            new_end = max(cur_end, addr + count)
+            block_len = new_end - cur_start
+            # 연속(addr <= cur_end)이고 블록 길이 <= 125일 때만 합침. 구간 끊기거나 125 초과면 여기서 자름
+            if addr <= cur_end and block_len <= MAX_REGISTERS_OR_COILS_PER_READ:
+                cur_end = new_end
                 cur_list.append((name, info, addr, count))
             else:
                 blocks.append((cur_start, cur_end - cur_start, cur_list))
@@ -219,7 +227,28 @@ def build_read_blocks(full_map):
                 cur_end = addr + count
                 cur_list = [(name, info, addr, count)]
         blocks.append((cur_start, cur_end - cur_start, cur_list))
-        out[mtype] = blocks
+        return blocks
+
+    out = {}
+    for mtype, tags in by_type.items():
+        if not tags:
+            continue
+        if mtype in ("coil", "discrete"):
+            out[mtype] = merge_blocks(tags)
+            continue
+        if mtype == "holding":
+            data_tags = [(n, i, a, c) for n, i, a, c in tags if not _is_string_entry(i)]
+            string_tags = [(n, i, a, c) for n, i, a, c in tags if _is_string_entry(i)]
+            out["holding_data"] = merge_blocks(data_tags)
+            out["holding_string"] = merge_blocks(string_tags)
+            continue
+        if mtype == "input_reg":
+            data_tags = [(n, i, a, c) for n, i, a, c in tags if not _is_string_entry(i)]
+            string_tags = [(n, i, a, c) for n, i, a, c in tags if _is_string_entry(i)]
+            out["input_reg_data"] = merge_blocks(data_tags)
+            out["input_reg_string"] = merge_blocks(string_tags)
+            continue
+        out[mtype] = merge_blocks(tags)
     return out
 
 

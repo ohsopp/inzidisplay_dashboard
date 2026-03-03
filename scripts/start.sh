@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 한 번에 실행: 필요하면 venv·npm·프론트 빌드까지 자동으로 한 뒤 서버 + 브라우저
+# 한 번에 실행: 백엔드(6005) + Vite 개발서버(5173) 띄우고 브라우저는 5173으로 오픈
 set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -8,7 +8,7 @@ BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 VENV_DIR="$BACKEND_DIR/venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
-FRONTEND_DIST="$BACKEND_DIR/frontend_dist"
+VITE_PORT="${VITE_PORT:-5173}"
 
 # --- 1) Python/venv 필수 (없으면 안내만) ---
 if ! command -v python3 &>/dev/null; then
@@ -29,7 +29,6 @@ if [ ! -d "$VENV_DIR" ]; then
   "$VENV_DIR/bin/pip" install --quiet -r "$BACKEND_DIR/requirements.txt"
   echo "백엔드 설정 완료."
 else
-  # venv 있지만 실행이 안 되면(다른 머신에서 만든 경우 등) 재생성
   if [ ! -x "$VENV_PYTHON" ] || ! "$VENV_PYTHON" -c "import sys" 2>/dev/null; then
     echo "백엔드 환경을 다시 설정합니다..."
     rm -rf "$VENV_DIR"
@@ -40,33 +39,37 @@ else
   fi
 fi
 
-# --- 3) frontend_dist 없으면 npm 설치 + 빌드 ---
-if [ ! -d "$FRONTEND_DIST" ] || [ ! -f "$FRONTEND_DIST/index.html" ]; then
-  if ! command -v npm &>/dev/null; then
-    echo "오류: npm이 없습니다. Node.js 를 설치한 뒤 다시 실행하세요."
-    exit 1
-  fi
-  echo "프론트엔드 준비 중 (한 번만)..."
+# --- 3) Node 있으면 Vite 개발서버 사용 (프론트 npm 설치만) ---
+USE_VITE=false
+if command -v node &>/dev/null && [ -d "$FRONTEND_DIR" ]; then
   if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+    echo "프론트엔드 의존성 설치 중 (한 번만)..."
     (cd "$FRONTEND_DIR" && npm install --no-audit --no-fund)
   fi
-  (cd "$FRONTEND_DIR" && node node_modules/vite/bin/vite.js build)
-  rm -rf "$FRONTEND_DIST"
-  cp -r "$FRONTEND_DIR/dist" "$FRONTEND_DIST"
-  echo "프론트엔드 준비 완료."
+  USE_VITE=true
 fi
 
-# --- 4) 서버 실행 + 브라우저 열기 ---
-echo "PLC 모니터 시작 (http://localhost:6005)..."
+if [ "$USE_VITE" != "true" ]; then
+  echo "오류: Node가 없습니다. Vite로 실행하려면 Node.js를 설치한 뒤 다시 실행하세요."
+  exit 1
+fi
+
+# --- 4) 백엔드(6005) + Vite(5173) 실행, 브라우저는 5173 열기 ---
+echo "PLC 모니터 시작 (백엔드 http://localhost:6005, 프론트 http://localhost:${VITE_PORT})..."
 export OPEN_BROWSER_FROM_SHELL=1
 "$VENV_PYTHON" "$BACKEND_DIR/launcher.py" &
 SERVER_PID=$!
+sleep 1.5
+(cd "$FRONTEND_DIR" && node node_modules/vite/bin/vite.js --port "$VITE_PORT") &
+VITE_PID=$!
 sleep 2.5
-# .desktop으로 실행 시 DISPLAY가 비어 있을 수 있음
 export DISPLAY="${DISPLAY:-:0}"
 echo "브라우저 열기 시도 중..."
-if ! xdg-open "http://localhost:6005" 2>/dev/null; then
-  gio open "http://localhost:6005" 2>/dev/null || true
+if ! xdg-open "http://localhost:${VITE_PORT}" 2>/dev/null; then
+  gio open "http://localhost:${VITE_PORT}" 2>/dev/null || true
 fi
-echo "안 열리면 브라우저에 직접 입력: http://localhost:6005"
+echo "안 열리면 브라우저에 직접 입력: http://localhost:${VITE_PORT}"
+cleanup() { kill $VITE_PID 2>/dev/null; exit 0; }
+trap cleanup INT TERM
 wait $SERVER_PID
+kill $VITE_PID 2>/dev/null || true

@@ -24,7 +24,7 @@ cat > "$DESKTOP/PLC모니터.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=PLC 모니터
-Comment=PLC 모니터 실행 (로컬호스트 브라우저 자동 오픈)
+Comment=PLC 모니터 실행 (Vite 개발서버 http://localhost:5173 자동 오픈)
 Exec=$EXEC
 Path=$REPO_ROOT
 Terminal=true

@@ -256,6 +256,25 @@ def modbus_disconnect():
     return {"ok": True}
 
 
+@app.route("/api/modbus/poll-intervals", methods=["GET", "POST", "OPTIONS"])
+def modbus_poll_intervals():
+    if request.method == "OPTIONS":
+        return "", 204
+    try:
+        from modbus_poller import get_poll_intervals, set_poll_intervals
+    except ImportError:
+        return {"error": "modbus_poller를 불러올 수 없습니다."}, 500
+    if request.method == "GET":
+        return get_poll_intervals()
+    data = request.get_json(silent=True) or {}
+    set_poll_intervals(
+        boolean_ms=data.get("boolean_ms"),
+        data_ms=data.get("data_ms"),
+        string_ms=data.get("string_ms"),
+    )
+    return get_poll_intervals()
+
+
 # MQTT 구독 시작 (앱 로드 시 한 번만)
 try:
     from mqtt_subscriber import start as mqtt_start
