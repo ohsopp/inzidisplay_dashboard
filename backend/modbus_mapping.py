@@ -4,6 +4,7 @@
 - modbus_options.json으로 OFFSET/base/디바이스→Modbus 변환.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -51,6 +52,22 @@ def load_io_variables():
     with open(IO_VARIABLES_PATH, "r", encoding="utf-8") as f:
         obj = json.load(f)
     return list(obj.items())
+
+
+def get_device_group(name):
+    """변수명에서 PLC 디바이스 접두어 추출. 예: xxx_Y14C -> 'Y', xxx_M300 -> 'M', xxx_D1820 -> 'D'. 없으면 None."""
+    if not name or not isinstance(name, str):
+        return None
+    m = re.search(r"_([YMDX])[\dA-Za-z]*$", name.strip())
+    return m.group(1).upper() if m else None
+
+
+def filter_entries_by_device_group(entries, group):
+    """entries [(name, info), ...]에서 group('Y'|'M'|'D'|'X')에 해당하는 것만 반환."""
+    if not group or str(group).upper() not in ("Y", "M", "D", "X"):
+        return entries
+    g = str(group).upper()
+    return [(name, info) for name, info in entries if get_device_group(name) == g]
 
 
 def _reg_count_for_entry(info):

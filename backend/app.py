@@ -208,6 +208,9 @@ def modbus_connect():
         host = (data.get("host") or "127.0.0.1").strip()
         port = int(data.get("port", 502))
         slave_id = int(data.get("slave_id", 1))
+        poll_group = (data.get("poll_group") or "").strip() or None  # None 또는 'Y'|'M'|'D'|'X'
+        if poll_group and poll_group.upper() not in ("Y", "M", "D", "X"):
+            poll_group = None
     except (TypeError, ValueError) as e:
         return {"error": f"잘못된 요청: {e}"}, 400
 
@@ -231,11 +234,11 @@ def modbus_connect():
         modbus_stop_event = threading.Event()
         modbus_thread = threading.Thread(
             target=run_poller,
-            args=(host, port, slave_id, _modbus_on_parsed, _modbus_on_error, modbus_stop_event),
+            args=(host, port, slave_id, _modbus_on_parsed, _modbus_on_error, modbus_stop_event, poll_group),
             daemon=True,
         )
         modbus_thread.start()
-        modbus_state = {"host": host, "port": port, "slave_id": slave_id}
+        modbus_state = {"host": host, "port": port, "slave_id": slave_id, "poll_group": poll_group}
         broadcast("modbus_connected", modbus_state)
         return {"ok": True}
     except Exception as e:

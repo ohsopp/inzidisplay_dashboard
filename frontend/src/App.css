@@ -486,6 +486,52 @@
 .modbus-control .field-group { min-width: 8rem; }
 .modbus-status { margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; }
 
+.modbus-group-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0;
+}
+.modbus-group-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.modbus-group-tabs {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--bg-sub);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.modbus-group-tab {
+  padding: 0.4rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.modbus-group-tab + .modbus-group-tab {
+  margin-left: 1px;
+}
+.modbus-group-tab:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+.modbus-group-tab.active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
 .modbus-poll-settings-btn {
   display: inline-flex;
   align-items: center;

@@ -186,6 +186,13 @@ function decodeForDisplay(raw, info) {
   return raw
 }
 
+/** 변수명에서 PLC 디바이스 그룹 추출. 예: xxx_Y14C -> 'Y', xxx_M300 -> 'M'. 없으면 null */
+function getDeviceGroup(name) {
+  if (!name || typeof name !== 'string') return null
+  const m = name.match(/_([YMDX])[\dA-Za-z]*$/i)
+  return m ? m[1].toUpperCase() : null
+}
+
 /** Dword 쌍·String 연속(같은 이름 + 연속 D주소)을 한 행으로 묶은 표시용 리스트. */
 function buildDisplayVariableList(ioVariableList) {
   const result = []
@@ -305,6 +312,7 @@ function App() {
   const [modbusPollUnits, setModbusPollUnits] = useState({ boolean: 'ms', data: 'ms', string: 'ms' })
   const [modbusPollError, setModbusPollError] = useState('')
   const [modbusWordSwapMode, setModbusWordSwapMode] = useState('default') // 'default' = 상위→하위, 'swap' = 하위→상위
+  const [modbusPollGroup, setModbusPollGroup] = useState('all') // 'all' | 'Y' | 'D' | 'M' | 'X' — 폴링/표시 그룹
 
   const POLL_MIN_MS = 200
   const POLL_MAX_MS = 1800000 // 30min
@@ -361,6 +369,13 @@ function App() {
     () => buildDisplayVariableList(ioVariableList),
     [ioVariableList]
   )
+
+  /** Modbus 뷰에서 그룹(Y/D/M/X)별로 필터한 목록. modbusPollGroup이 'all'이면 전체 */
+  const modbusDisplayList = useMemo(() => {
+    if (modbusPollGroup === 'all') return displayVariableList
+    const g = modbusPollGroup.toUpperCase()
+    return displayVariableList.filter((row) => getDeviceGroup(row.name) === g)
+  }, [displayVariableList, modbusPollGroup])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -545,14 +560,16 @@ function App() {
   const handleModbusConnect = async () => {
     setModbusError('')
     try {
+      const payload = {
+        host: modbusHost.trim(),
+        port: parseInt(modbusPort, 10) || 5051,
+        slave_id: (() => { const n = parseInt(modbusSlaveId, 10); return Number.isNaN(n) ? 0 : n; })(),
+      }
+      if (modbusPollGroup !== 'all') payload.poll_group = modbusPollGroup
       const res = await fetch(`${API_URL}/api/modbus/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          host: modbusHost.trim(),
-          port: parseInt(modbusPort, 10) || 5051,
-          slave_id: (() => { const n = parseInt(modbusSlaveId, 10); return Number.isNaN(n) ? 0 : n; })(),
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok) setModbusError(data.error || '연결 실패')
@@ -568,6 +585,35 @@ function App() {
       // ignore
     }
   }
+
+  // 그룹 탭 변경 시 이미 연결 중이면 선택한 그룹만 폴링하도록 재연결
+  const modbusPollGroupRef = useRef(modbusPollGroup)
+  useEffect(() => {
+    const prev = modbusPollGroupRef.current
+    modbusPollGroupRef.current = modbusPollGroup
+    if (prev === modbusPollGroup || !modbusConnected) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        await fetch(`${API_URL}/api/modbus/disconnect`, { method: 'POST' })
+        if (cancelled) return
+        const payload = {
+          host: modbusHost.trim(),
+          port: parseInt(modbusPort, 10) || 5051,
+          slave_id: (() => { const n = parseInt(modbusSlaveId, 10); return Number.isNaN(n) ? 0 : n; })(),
+        }
+        if (modbusPollGroup !== 'all') payload.poll_group = modbusPollGroup
+        await fetch(`${API_URL}/api/modbus/connect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch {
+        // ignore
+      }
+    })()
+    return () => { cancelled = true }
+  }, [modbusPollGroup, modbusConnected, modbusHost, modbusPort, modbusSlaveId])
 
   const fetchModbusPollIntervals = async () => {
     try {
@@ -957,6 +1003,23 @@ function App() {
                     </button>
                   </div>
                 </div>
+                <div className="modbus-group-row">
+                  <span className="modbus-group-label">폴링 그룹</span>
+                  <div className="modbus-group-tabs" role="tablist" aria-label="폴링 그룹">
+                    {['all', 'Y', 'D', 'M'].map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        role="tab"
+                        aria-selected={modbusPollGroup === g}
+                        className={`modbus-group-tab ${modbusPollGroup === g ? 'active' : ''}`}
+                        onClick={() => setModbusPollGroup(g)}
+                      >
+                        {g === 'all' ? '전체' : g}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <section className="control-panel modbus-control">
                   <div className="control-row">
                     <div className="field-group">
@@ -1016,7 +1079,8 @@ function App() {
                   {modbusError && <p className="error-message">{modbusError}</p>}
                   {modbusConnected && (
                     <p className="modbus-status">
-                      경고등/알람(Boolean) {modbusPollIntervals.boolean_ms}ms 간격, 데이터 {modbusPollIntervals.data_ms}ms 간격, 금형이름 {modbusPollIntervals.string_ms}ms 간격 폴링 중
+                      경고등/알람(Boolean) {modbusPollIntervals.boolean_ms}ms, 데이터 {modbusPollIntervals.data_ms}ms, 금형이름 {modbusPollIntervals.string_ms}ms 간격 폴링 중
+                      {modbusPollGroup !== 'all' && ` (${modbusPollGroup}만)`}
                     </p>
                   )}
                 </section>
@@ -1145,8 +1209,10 @@ function App() {
                 </div>
               </div>
               <div className="parsed-view-body">
-                {displayVariableList.length === 0 ? (
-                  <p className="parsed-view-empty">io_variables.json을 불러오는 중…</p>
+                {modbusDisplayList.length === 0 ? (
+                  <p className="parsed-view-empty">
+                    {displayVariableList.length === 0 ? 'io_variables.json을 불러오는 중…' : `선택한 그룹(${modbusPollGroup === 'all' ? '전체' : modbusPollGroup})에 해당하는 변수가 없습니다.`}
+                  </p>
                 ) : (
                   <div className="parsed-vars-grid">
                     <div
@@ -1187,7 +1253,7 @@ function App() {
                         </div>
                       )}
                     </div>
-                    {displayVariableList.map((row) => {
+                    {modbusDisplayList.map((row) => {
                       const value = getDisplayValue(row, modbusValues, 'modbus')
                       const { name, info } = row
                       return (

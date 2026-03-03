@@ -13,6 +13,7 @@ from modbus_mapping import (
     build_full_map,
     build_read_blocks,
     decode_value,
+    filter_entries_by_device_group,
 )
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -87,9 +88,10 @@ def set_poll_intervals(boolean_ms=None, data_ms=None, string_ms=None, word_swap=
     _save_intervals_to_file()
 
 
-def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
+def run_poller(host, port, slave_id, on_parsed, on_error, stop_event, poll_group=None):
     """
     폴링 스레드: Boolean(Coil/Discrete), 데이터(holding_data/input_reg_data), 금형이름(holding_string/input_reg_string) 각각 간격 적용.
+    poll_group: None 또는 'all' 이면 전체, 'Y'|'M'|'D'|'X' 이면 해당 디바이스만 폴링.
     """
     try:
         from pymodbus.client import ModbusTcpClient
@@ -99,6 +101,8 @@ def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
 
     options = load_options()
     entries = load_io_variables()
+    if poll_group and str(poll_group).strip().upper() in ("Y", "M", "D", "X"):
+        entries = filter_entries_by_device_group(entries, str(poll_group).strip().upper())
     full_map = build_full_map(entries, options)
     blocks = build_read_blocks(full_map)
 
