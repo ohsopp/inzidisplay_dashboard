@@ -301,11 +301,12 @@ def build_read_blocks(full_map):
     return out
 
 
-def decode_value(info, raw_regs=None, raw_bits=None):
+def decode_value(info, raw_regs=None, raw_bits=None, word_swap=False):
     """
     범용 디코더: dataType, length, scale, unit 반영.
     raw_regs: 레지스터 리스트 (holding/input_reg)
     raw_bits: 비트 리스트 (coil/discrete)
+    word_swap: True면 다중 레지스터 해석 시 워드 순서 반전 (하위워드→상위워드). 00 01 E8 5E → E8 5E 00 01로 해석.
     """
     if raw_bits is not None and len(raw_bits) >= 1:
         return 1 if raw_bits[0] else 0
@@ -328,14 +329,21 @@ def decode_value(info, raw_regs=None, raw_bits=None):
             v -= 0x10000
         return round(v * scale, 4) if scale != 1 else v
     if dt == "dword" and len(raw_regs) >= 2:
-        # Modbus 일반: 첫 레지스터=상위 16비트, 둘째=하위 16비트 (빅엔디안)
-        v = ((raw_regs[0] & 0xFFFF) << 16) | (raw_regs[1] & 0xFFFF)
+        # word_swap=False: 첫 레지스터=상위 16비트, 둘째=하위 (00 01 E8 5E → 0x0001E85E)
+        # word_swap=True:  둘째=상위, 첫째=하위 (00 01 E8 5E → 0xE85E0001, 즉 E8 5E 00 01)
+        if word_swap:
+            v = ((raw_regs[1] & 0xFFFF) << 16) | (raw_regs[0] & 0xFFFF)
+        else:
+            v = ((raw_regs[0] & 0xFFFF) << 16) | (raw_regs[1] & 0xFFFF)
         if v >= 0x80000000:
             v -= 0x100000000
         return round(v * scale, 4) if scale != 1 else v
     if dt == "string":
+        regs = raw_regs[:8]
+        if word_swap:
+            regs = list(reversed(regs))
         buf = []
-        for r in raw_regs[:8]:
+        for r in regs:
             buf.append((r >> 8) & 0xFF)
             buf.append(r & 0xFF)
         return "".join(f"{b:02x}" for b in buf)

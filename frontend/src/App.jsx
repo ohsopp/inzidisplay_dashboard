@@ -304,6 +304,7 @@ function App() {
   const [modbusPollDisplay, setModbusPollDisplay] = useState({ boolean: '', data: '', string: '' }) // 입력란 문자열(비워두기 가능)
   const [modbusPollUnits, setModbusPollUnits] = useState({ boolean: 'ms', data: 'ms', string: 'ms' })
   const [modbusPollError, setModbusPollError] = useState('')
+  const [modbusWordSwapMode, setModbusWordSwapMode] = useState('default') // 'default' = 상위→하위, 'swap' = 하위→상위
 
   const POLL_MIN_MS = 200
   const POLL_MAX_MS = 1800000 // 30min
@@ -578,9 +579,24 @@ function App() {
           data_ms: Number(data.data_ms) || 500,
           string_ms: Number(data.string_ms) || 5000,
         })
+        setModbusWordSwapMode(data.word_swap ? 'swap' : 'default')
       }
     } catch {
       // ignore
+    }
+  }
+
+  const handleModbusWordSwapChange = async (e) => {
+    const value = e.target.value
+    setModbusWordSwapMode(value)
+    try {
+      await fetch(`${API_URL}/api/modbus/poll-intervals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word_swap: value === 'swap' }),
+      })
+    } catch {
+      // 복원하지 않고 유지 (다음 탭 진입 시 서버 값으로 덮어짐)
     }
   }
 
@@ -914,18 +930,32 @@ function App() {
               <div className="parsed-view-header">
                 <div className="parsed-view-title-row">
                   <h2>Modbus TCP</h2>
-                  <button
-                    type="button"
-                    className="modbus-poll-settings-btn"
-                    onClick={() => setModbusPollSettingsOpen(true)}
-                    title="폴링 간격 설정"
-                    aria-label="폴링 간격 설정"
-                  >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="3" />
-                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                  </button>
+                  <div className="parsed-view-title-row-right">
+                    <label className="parsed-endian-select-wrap">
+                      <span className="parsed-endian-label">워드 순서</span>
+                      <select
+                        className="parsed-endian-select"
+                        value={modbusWordSwapMode}
+                        onChange={handleModbusWordSwapChange}
+                        aria-label="레지스터 워드 순서"
+                      >
+                        <option value="default">Default (상위→하위)</option>
+                        <option value="swap">Word Swap (하위→상위)</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="modbus-poll-settings-btn"
+                      onClick={() => setModbusPollSettingsOpen(true)}
+                      title="폴링 간격 설정"
+                      aria-label="폴링 간격 설정"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 <section className="control-panel modbus-control">
                   <div className="control-row">

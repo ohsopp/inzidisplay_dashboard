@@ -265,14 +265,19 @@ def modbus_poll_intervals():
     except ImportError:
         return {"error": "modbus_poller를 불러올 수 없습니다."}, 500
     if request.method == "GET":
-        return get_poll_intervals()
+        out = get_poll_intervals()
+        out.setdefault("word_swap", False)
+        return out
     data = request.get_json(silent=True) or {}
     set_poll_intervals(
         boolean_ms=data.get("boolean_ms"),
         data_ms=data.get("data_ms"),
         string_ms=data.get("string_ms"),
+        word_swap=data.get("word_swap") if "word_swap" in data else None,
     )
-    return get_poll_intervals()
+    out = get_poll_intervals()
+    out.setdefault("word_swap", False)
+    return out
 
 
 # MQTT 구독 시작 (앱 로드 시 한 번만)

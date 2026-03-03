@@ -19,7 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 INTERVALS_FILE = SCRIPT_DIR / "modbus_poll_intervals.json"
 
 # GUI/API에서 수정 가능한 폴링 간격(ms). 경고등/금형 기동 등 자주 갱신되도록 Boolean/데이터 기본값 단축.
-DEFAULT_INTERVALS = {"boolean_ms": 500, "data_ms": 500, "string_ms": 5000}
+DEFAULT_INTERVALS = {"boolean_ms": 500, "data_ms": 500, "string_ms": 5000, "word_swap": False}
 MIN_INTERVAL_MS = 200
 MAX_INTERVAL_MS = 1800000  # 30분
 
@@ -31,11 +31,13 @@ def _load_intervals_from_file():
         with open(INTERVALS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
-            return {
+            out = {
                 "boolean_ms": int(data.get("boolean_ms", DEFAULT_INTERVALS["boolean_ms"])),
                 "data_ms": int(data.get("data_ms", DEFAULT_INTERVALS["data_ms"])),
                 "string_ms": int(data.get("string_ms", DEFAULT_INTERVALS["string_ms"])),
             }
+            out["word_swap"] = bool(data.get("word_swap", DEFAULT_INTERVALS["word_swap"]))
+            return out
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         pass
     return None
@@ -69,7 +71,7 @@ def _parse_ms(val):
         return None
 
 
-def set_poll_intervals(boolean_ms=None, data_ms=None, string_ms=None):
+def set_poll_intervals(boolean_ms=None, data_ms=None, string_ms=None, word_swap=None):
     global poll_intervals
     v = _parse_ms(boolean_ms)
     if v is not None:
@@ -80,6 +82,8 @@ def set_poll_intervals(boolean_ms=None, data_ms=None, string_ms=None):
     v = _parse_ms(string_ms)
     if v is not None:
         poll_intervals["string_ms"] = v
+    if word_swap is not None:
+        poll_intervals["word_swap"] = bool(word_swap)
     _save_intervals_to_file()
 
 
@@ -169,10 +173,11 @@ def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
                         _set_parsed(name_or_names, "-")
                     continue
                 regs = rr.registers[:count]
+                word_swap = get_poll_intervals().get("word_swap", False)
                 for name_or_names, info, addr, tag_count in tags:
                     off = addr - start
                     chunk = regs[off : off + tag_count] if off + tag_count <= len(regs) else []
-                    val = decode_value(info, raw_regs=chunk)
+                    val = decode_value(info, raw_regs=chunk, word_swap=word_swap)
                     _set_parsed(name_or_names, val)
             except Exception as e:
                 if own_client:
@@ -199,10 +204,11 @@ def run_poller(host, port, slave_id, on_parsed, on_error, stop_event):
                         _set_parsed(name_or_names, "-")
                     continue
                 regs = rr.registers[:count]
+                word_swap = get_poll_intervals().get("word_swap", False)
                 for name_or_names, info, addr, tag_count in tags:
                     off = addr - start
                     chunk = regs[off : off + tag_count] if off + tag_count <= len(regs) else []
-                    val = decode_value(info, raw_regs=chunk)
+                    val = decode_value(info, raw_regs=chunk, word_swap=word_swap)
                     _set_parsed(name_or_names, val)
             except Exception as e:
                 for name_or_names, *_ in tags:
