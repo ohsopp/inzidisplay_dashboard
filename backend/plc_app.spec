@@ -17,22 +17,16 @@ if os.path.isdir(FRONTEND_DIST):
 else:
     print('Warning: backend/frontend_dist 없음. 먼저 프론트 빌드 후 복사하세요.', file=sys.stderr)
 
-# io_variables.json, modbus_options.json 은 _MEIPASS에 두고 로드
+# io_variables.json 은 _MEIPASS에 두고 로드
 if os.path.isfile(os.path.join(REPO, 'io_variables.json')):
     datas.append((os.path.join(REPO, 'io_variables.json'), '.'))
-for name in ['modbus_options.json']:
-    p = os.path.join(BACKEND, name)
-    if os.path.isfile(p):
-        datas.append((p, '.'))
 
 # 숨김 import (런타임에 로드되는 모듈)
 hiddenimports = [
     'flask',
     'flask_cors',
-    'pymodbus.client',
     'paho.mqtt.client',
     'engineio',
-    'modbus_mapping',
     'mqtt_subscriber',
 ]
 

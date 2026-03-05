@@ -933,7 +933,7 @@
   "D1914": {
     "dataType": "Word",
     "length": 1,
-    "value": 372,
+    "value": 388,
     "name": "todayRunningTime_D1914"
   }
 }

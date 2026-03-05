@@ -19,7 +19,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 MC_FAKE_VALUES_PATH = SCRIPT_DIR / "mc_fake_values.json"
 
-# 3E 디바이스 코드 (plc_tcp_send / modbus_tcp_read와 동일)
+# 3E 디바이스 코드 (plc_tcp_send와 동일)
 DEVICE_CODE_TO_LETTER = {0xA8: "D", 0x9D: "Y", 0x90: "M"}
 
 LISTEN_HOST = "0.0.0.0"

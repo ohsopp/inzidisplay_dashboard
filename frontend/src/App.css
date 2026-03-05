@@ -497,57 +497,11 @@
   background: var(--border);
 }
 
-.modbus-control { margin-bottom: 0.5rem; }
-.modbus-control .field-group { min-width: 8rem; }
-.modbus-status { margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; }
+.mc-control { margin-bottom: 0.5rem; }
+.mc-control .field-group { min-width: 8rem; }
+.mc-status { margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; }
 
-.modbus-group-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-  padding: 0.5rem 0;
-}
-.modbus-group-label {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-.modbus-group-tabs {
-  display: inline-flex;
-  align-items: stretch;
-  background: var(--bg-sub);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-.modbus-group-tab {
-  padding: 0.4rem 1rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-}
-.modbus-group-tab + .modbus-group-tab {
-  margin-left: 1px;
-}
-.modbus-group-tab:hover {
-  color: var(--text);
-  background: var(--bg-tertiary);
-}
-.modbus-group-tab.active {
-  color: #fff;
-  background: var(--accent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-}
-
-.modbus-poll-settings-btn {
+.mc-poll-settings-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -561,17 +515,17 @@
   cursor: pointer;
   flex-shrink: 0;
 }
-.modbus-poll-settings-btn svg {
+.mc-poll-settings-btn svg {
   width: 18px;
   height: 18px;
 }
-.modbus-poll-settings-btn:hover {
+.mc-poll-settings-btn:hover {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
 }
 
-.modbus-poll-modal-overlay {
+.mc-poll-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
@@ -580,7 +534,7 @@
   justify-content: center;
   z-index: 1000;
 }
-.modbus-poll-modal {
+.mc-poll-modal {
   background: #1a222d;
   border: 1px solid #2d3a4a;
   border-radius: 12px;
@@ -590,7 +544,7 @@
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
-.modbus-poll-modal h3 {
+.mc-poll-modal h3 {
   margin: 0;
   padding: 1rem 1.5rem;
   font-size: 1.05rem;
@@ -599,14 +553,14 @@
   background: #232d3b;
   border-bottom: 1px solid #2d3a4a;
 }
-.modbus-poll-modal-desc {
+.mc-poll-modal-desc {
   margin: 0;
   padding: 0.75rem 1.5rem;
   font-size: 0.85rem;
   color: #8b949e;
   background: #1a222d;
 }
-.modbus-poll-modal-error {
+.mc-poll-modal-error {
   margin: 0;
   padding: 0.5rem 1.5rem;
   font-size: 0.85rem;
@@ -614,34 +568,34 @@
   background: rgba(248, 81, 73, 0.1);
   border-bottom: 1px solid #2d3a4a;
 }
-.modbus-poll-modal-fields {
+.mc-poll-modal-fields {
   display: flex;
   flex-direction: column;
   gap: 0;
   margin-bottom: 0;
   padding: 0 1.5rem 1.25rem;
 }
-.modbus-poll-modal-fields .field-group {
+.mc-poll-modal-fields .field-group {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.6rem 0;
   border-bottom: 1px solid #2d3a4a;
 }
-.modbus-poll-modal-fields .field-group:last-child {
+.mc-poll-modal-fields .field-group:last-child {
   border-bottom: none;
 }
-.modbus-poll-modal-fields .field-group label {
+.mc-poll-modal-fields .field-group label {
   min-width: 11rem;
   font-size: 0.9rem;
   color: #c9d1d9;
 }
-.modbus-poll-input-wrap {
+.mc-poll-input-wrap {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
 }
-.modbus-poll-unit-select {
+.mc-poll-unit-select {
   padding: 0.4rem 0.5rem;
   font-size: 0.9rem;
   color: #e6edf3;
@@ -651,11 +605,11 @@
   cursor: pointer;
   flex-shrink: 0;
 }
-.modbus-poll-unit-select:focus {
+.mc-poll-unit-select:focus {
   outline: none;
   border-color: var(--accent);
 }
-.modbus-poll-modal-fields .field-group input {
+.mc-poll-modal-fields .field-group input {
   width: 6rem;
   padding: 0.5rem 0.6rem;
   font-size: 0.95rem;
@@ -664,17 +618,17 @@
   border: 1px solid #2d3a4a;
   border-radius: 6px;
 }
-.modbus-poll-modal-fields .field-group input:focus {
+.mc-poll-modal-fields .field-group input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
-.modbus-poll-unit {
+.mc-poll-unit {
   font-size: 0.9rem;
   color: #8b949e;
   font-weight: 500;
 }
-.modbus-poll-modal-actions {
+.mc-poll-modal-actions {
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
@@ -682,21 +636,21 @@
   background: #232d3b;
   border-top: 1px solid #2d3a4a;
 }
-.modbus-poll-modal-actions .btn {
+.mc-poll-modal-actions .btn {
   padding: 0.5rem 1rem;
   font-size: 0.9rem;
 }
-.modbus-poll-modal-actions .btn-primary {
+.mc-poll-modal-actions .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
-.modbus-poll-modal-actions .btn:not(.btn-primary) {
+.mc-poll-modal-actions .btn:not(.btn-primary) {
   background: #2d3a4a;
   color: #c9d1d9;
   border: 1px solid #3d4d5c;
 }
-.modbus-poll-modal-actions .btn:not(.btn-primary):hover {
+.mc-poll-modal-actions .btn:not(.btn-primary):hover {
   background: #3d4d5c;
 }
 

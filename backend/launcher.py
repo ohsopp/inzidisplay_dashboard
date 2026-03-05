@@ -9,7 +9,7 @@ import threading
 import time
 import urllib.request
 
-# backend 폴더를 path에 넣어서 app, modbus_poller 등 import 가능하게
+# backend 폴더를 path에 넣어서 app import 가능하게
 _BACKEND = os.path.dirname(os.path.abspath(__file__))
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
