@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import atexit
 from flask import Flask, Response, request, send_from_directory
 
@@ -29,6 +30,8 @@ mc_thread = None
 mc_stop_event = None
 mc_state = None  # {"host": str, "port": int} when connected (slave 없음)
 mc_fake_server_proc = None
+# InfluxDB 전용 MC 폴러 (M 1초/값1만, D 50ms·일부 1시간, Y 1초)
+mc_influx_stop_event = None
 
 # MQTT 센서 (VVB001 진동, TP3237 온도) - 마지막 수신값 (새 SSE 클라이언트용)
 last_sensor_data = {}  # {"VVB001": {"value": ..., "ts": ...}, "TP3237": {...}}
@@ -63,7 +66,14 @@ def _ensure_local_mc_fake_server(host: str, port: int):
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except Exception:
+        for _ in range(15):  # 최대 1.5초 대기
+            time.sleep(0.1)
+            if _is_tcp_open(host, port):
+                break
+        if not _is_tcp_open(host, port):
+            print("[MC] 가짜 서버(5002) 기동 대기 실패. 수동 실행: python backend/plc_tcp_fake_response.py", flush=True)
+    except Exception as e:
+        print("[MC] 가짜 서버 기동 예외:", e, flush=True)
         mc_fake_server_proc = None
 
 
@@ -155,6 +165,12 @@ def health():
 
 def _mc_on_parsed(parsed):
     broadcast("mc_data", {"parsed": parsed})
+    # 동일 데이터를 InfluxDB에 기록 (M: 값 1만, Y: 전부, D: 일반 매회 / 1시간 항목은 1시간마다)
+    try:
+        from influxdb_from_mc import write_parsed_to_influx
+        write_parsed_to_influx(parsed)
+    except Exception as e:
+        print("[InfluxDB] 기록 오류:", e, flush=True)
 
 
 def _mc_on_error(message):
@@ -166,7 +182,7 @@ def mc_connect():
     if request.method == "OPTIONS":
         return "", 204
 
-    global mc_thread, mc_stop_event, mc_state
+    global mc_thread, mc_stop_event, mc_state, mc_influx_stop_event
     try:
         data = request.get_json(silent=True) or {}
         host = (data.get("host") or "127.0.0.1").strip()
@@ -199,6 +215,9 @@ def mc_connect():
         )
         mc_thread.start()
         mc_state = {"host": host, "port": port}
+        # InfluxDB는 대시보드 폴러와 동일한 수신 데이터로 기록 (mc_connect 시 별도 폴러 없음)
+        mc_influx_stop_event = None
+        print("[MC] 연결됨 %s:%s → 폴링 시작 후 수신 데이터가 InfluxDB에 자동 기록됩니다." % (host, port), flush=True)
         broadcast("mc_connected", mc_state)
         return {"ok": True}
     except Exception as e:
@@ -209,14 +228,41 @@ def mc_connect():
 def mc_disconnect():
     if request.method == "OPTIONS":
         return "", 204
-    global mc_thread, mc_stop_event, mc_state
+    global mc_thread, mc_stop_event, mc_state, mc_influx_stop_event
     if mc_stop_event:
         mc_stop_event.set()
+    if mc_influx_stop_event:
+        mc_influx_stop_event.set()
     mc_thread = None
     mc_stop_event = None
     mc_state = None
+    mc_influx_stop_event = None
     broadcast("mc_disconnected", {})
     return {"ok": True}
+
+
+@app.route("/api/influxdb/status", methods=["GET"])
+def influxdb_status():
+    """InfluxDB 연결 상태 확인 (연결 시도 후 결과 반환)."""
+    try:
+        from influxdb_writer import check_connection
+        from influxdb_config import INFLUX_URL
+        ok, msg = check_connection()
+        return {"ok": ok, "message": msg, "url": INFLUX_URL}
+    except Exception as e:
+        return {"ok": False, "message": str(e), "url": ""}
+
+
+@app.route("/api/influxdb/test-write", methods=["POST", "GET"])
+def influxdb_test_write():
+    """테스트용 포인트 1건 기록. 대시보드에서 measurement 'plc', tag 확인용."""
+    try:
+        from influxdb_writer import write_plc_point
+        if write_plc_point("_test_ping", 1, "test"):
+            return {"ok": True, "message": "테스트 기록 완료. 대시보드에서 Bucket → measurement 'plc' 선택"}
+        return {"ok": False, "message": "InfluxDB 연결/기록 실패"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
 
 
 # MQTT 구독 시작 (앱 로드 시 한 번만)
@@ -254,4 +300,17 @@ if os.path.isdir(_FRONTEND_DIST):
 
 
 if __name__ == "__main__":
+    try:
+        from influxdb_writer import check_connection
+        from influxdb_config import INFLUX_URL
+        print("[InfluxDB] 연결 시도: %s" % INFLUX_URL, flush=True)
+        ok, msg = check_connection()
+        if ok:
+            print("[InfluxDB] 연결됨 → MC 폴링 시 자동 기록됩니다.", flush=True)
+        else:
+            print("[InfluxDB] 연결 실패 (%s)" % msg, flush=True)
+            print("  같은 터미널에서 확인: curl -s -o /dev/null -w '%%{http_code}' %s/health  → 200 나와야 함" % INFLUX_URL.rstrip("/"), flush=True)
+            print("  백엔드를 Docker 안에서 실행 중이면: INFLUX_URL=http://host.docker.internal:8086 또는 호스트 IP 사용", flush=True)
+    except Exception:
+        pass
     app.run(host="0.0.0.0", port=6005, debug=True, use_reloader=False, threaded=True)

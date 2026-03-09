@@ -56,6 +56,52 @@ def get_mc_entries():
     return result
 
 
+# InfluxDB 1시간 주기 저장 대상 (50ms 폴링은 하되 저장만 1시간마다)
+INFLUX_HOURLY_SAVE_NAMES = frozenset({
+    "currentDieNumber_D140",
+    "currentDieName_D1560", "currentDieName_D1561", "currentDieName_D1562", "currentDieName_D1563",
+    "currentDieName_D1564", "currentDieName_D1565", "currentDieName_D1566", "currentDieName_D1567",
+    "currentDieHeight_D711",
+    "currentBalanceAirPressure_D713",
+    "nextDieNumber_D510",
+    "nextDieName_D549", "nextDieName_D550", "nextDieName_D551", "nextDieName_D552",
+    "nextDieName_D553", "nextDieName_D554", "nextDieName_D555", "nextDieName_D556",
+    "nextDieHeight_D511",
+    "nextBalanceAirPressure_D513",
+    "presetCounter_D1816",
+    "presetCounter_D1817",
+})
+
+
+def get_mc_entries_by_device(device: str, exclude_hourly_d: bool = False):
+    """
+    device: "M" | "D" | "Y"
+    exclude_hourly_d: True면 D 중 INFLUX_HOURLY_SAVE_NAMES 제외 (일반 D만)
+    """
+    entries = get_mc_entries()
+    out = []
+    for e in entries:
+        name, dev, *_ = e
+        if dev != device:
+            continue
+        if device == "D" and exclude_hourly_d and name in INFLUX_HOURLY_SAVE_NAMES:
+            continue
+        out.append(e)
+    return out
+
+
+def get_mc_entries_hourly_d():
+    """D 중 1시간마다 InfluxDB에 저장할 항목만."""
+    entries = get_mc_entries()
+    return [e for e in entries if e[1] == "D" and e[0] in INFLUX_HOURLY_SAVE_NAMES]
+
+
+def get_name_to_device() -> dict:
+    """변수명 → device ("M"|"D"|"Y") 매핑. InfluxDB 기록 시 구분용."""
+    entries = get_mc_entries()
+    return {e[0]: e[1] for e in entries}
+
+
 def num_words_from_type(data_type: str, length: int) -> int:
     t = (data_type or "").strip().lower()
     if t == "boolean":

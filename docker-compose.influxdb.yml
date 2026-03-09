@@ -1,0 +1,24 @@
+# InfluxDB 2.x - PLC 데이터 저장용 (포트 8086)
+# 실행: docker compose -f docker-compose.influxdb.yml up -d
+# 기본 토큰/버킷으로 backend/.env 또는 환경변수 없이 동작 (influxdb_config.py 기본값 사용)
+
+services:
+  influxdb:
+    image: influxdb:2
+    container_name: plc_influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: admin1234
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: plc-influx-admin-token
+      DOCKER_INFLUXDB_INIT_ORG: plc
+      DOCKER_INFLUXDB_INIT_BUCKET: plc_data
+      DOCKER_INFLUXDB_INIT_RETENTION: 52w
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    restart: unless-stopped
+
+volumes:
+  influxdb_data: {}
