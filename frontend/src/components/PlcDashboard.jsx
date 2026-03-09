@@ -1,11 +1,67 @@
 import { useEffect, useMemo, useState } from 'react'
 import './PlcDashboard.css'
 
+const DEFAULT_IO_PAGE_SIZE = 10
+
+function extractAddress(name) {
+  const m = String(name).match(/_([MXY][0-9A-F]+)$/i)
+  return m ? m[1].toUpperCase() : null
+}
+
+function parseIoSearch(startVal, endVal) {
+  const startRaw = String(startVal || '').trim()
+  const endRaw = String(endVal || '').trim()
+  if (!startRaw) return null
+  let start = startRaw.toUpperCase()
+  if (/^\d+$/.test(start)) start = `M${start}`
+  if (!endRaw) return { rangeStart: start, limit: DEFAULT_IO_PAGE_SIZE }
+  let end = endRaw.toUpperCase()
+  if (/^\d+$/.test(end)) end = `M${end}`
+  return { rangeStart: start, rangeEnd: end }
+}
+
+function addressInSearch(addr, search) {
+  if (!addr || !search) return true
+  const { rangeStart, rangeEnd } = search
+  const dev = rangeStart[0]
+  if (addr[0] !== dev) return false
+  const base = dev === 'Y' ? 16 : 10
+  const aNum = parseInt(addr.slice(1), base)
+  const sNum = parseInt(rangeStart.slice(1), base)
+  if (Number.isNaN(aNum) || Number.isNaN(sNum)) return false
+  if (rangeEnd) {
+    const eNum = parseInt(rangeEnd.slice(1), base)
+    if (Number.isNaN(eNum)) return false
+    const lo = Math.min(sNum, eNum)
+    const hi = Math.max(sNum, eNum)
+    return aNum >= lo && aNum <= hi
+  }
+  return aNum >= sNum
+}
+
+function filterAndSliceBySearch(rows, search) {
+  if (!search) return rows.slice(0, DEFAULT_IO_PAGE_SIZE)
+  const { rangeStart, rangeEnd, limit } = search
+  const dev = rangeStart[0]
+  const base = dev === 'Y' ? 16 : 10
+  const filtered = rows
+    .filter((r) => addressInSearch(r.address, search))
+    .sort((a, b) => {
+      const an = parseInt(a.address.slice(1), base)
+      const bn = parseInt(b.address.slice(1), base)
+      return an - bn
+    })
+  if (rangeEnd) return filtered
+  return filtered.slice(0, limit)
+}
+
 function PlcDashboard({ mcConnected, mcValues, ioVariableList }) {
   const [plcTrend, setPlcTrend] = useState({ spm: [], balanceAir: [], productionRate: [] })
   const [activeTab, setActiveTab] = useState('main')
   const [moldIndex, setMoldIndex] = useState(0)
   const [showMoldList, setShowMoldList] = useState(false)
+  const [ioSearchStart, setIoSearchStart] = useState('')
+  const [ioSearchEnd, setIoSearchEnd] = useState('')
 
   const infoByName = useMemo(() => Object.fromEntries(ioVariableList), [ioVariableList])
 
@@ -92,33 +148,21 @@ function PlcDashboard({ mcConnected, mcValues, ioVariableList }) {
     { key: 'lightCurtainRear_M359', label: '후면 광전관 동작', level: 'info' },
   ]), [])
 
-  const activeWarnings = useMemo(
-    () => warningConfig.filter((w) => Number(mcValues[w.key]) === 1),
-    [warningConfig, mcValues]
-  )
-
-  const warningCounts = useMemo(() => ({
-    critical: activeWarnings.filter((w) => w.level === 'critical').length,
-    warning: activeWarnings.filter((w) => w.level === 'warning').length,
-    info: activeWarnings.filter((w) => w.level === 'info').length,
-  }), [activeWarnings])
-
-  const ioItems = useMemo(() => ([
-    { key: 'emergencyStopRF_M300', label: '비상정지 RF', dir: '입력' },
-    { key: 'emergencyStopLF_M301', label: '비상정지 LF', dir: '입력' },
-    { key: 'emergencyStopRR_M302', label: '비상정지 RR', dir: '입력' },
-    { key: 'emergencyStopLR_M303', label: '비상정지 LR', dir: '입력' },
-    { key: 'safetyBlock_M329', label: '안전 블록', dir: '입력' },
-    { key: 'balanceAirAlarmLow_M331', label: '바란스 에어압력 저하', dir: '입력' },
-    { key: 'clutchValveError_M309', label: '클러치 밸브 이상', dir: '입력' },
-    { key: 'brakeValveError_M310', label: '브레이크 밸브 이상', dir: '입력' },
-    { key: 'lightCurtainFront_M340', label: '전면 광전관', dir: '입력' },
-    { key: 'lightCurtainRear_M359', label: '후면 광전관', dir: '입력' },
-    { key: 'warningLightRed_Y14C', label: '타워램프 적색', dir: '출력' },
-    { key: 'warningLightYellow_Y14D', label: '타워램프 황색', dir: '출력' },
-    { key: 'warningLightGreen_Y14E', label: '타워램프 녹색', dir: '출력' },
-    { key: 'towerLampBuzzer_Y14F', label: '부저', dir: '출력' },
-  ]), [])
+  const ioItems = useMemo(() => {
+    const items = []
+    for (const [name, info] of ioVariableList) {
+      const addr = extractAddress(name)
+      if (!addr) continue
+      const dt = String(info?.dataType || '').toLowerCase()
+      if (dt !== 'boolean') continue
+      const device = addr[0].toUpperCase()
+      const dir = device === 'M' ? '입력' : device === 'Y' ? '출력' : null
+      if (!dir) continue
+      const label = info?.description?.trim() || name.replace(/_[MXY][0-9A-F]+$/i, '') || name
+      items.push({ key: name, label, dir, address: addr })
+    }
+    return items
+  }, [ioVariableList])
 
   const ioRows = useMemo(
     () => ioItems.map((item) => {
@@ -130,6 +174,45 @@ function PlcDashboard({ mcConnected, mcValues, ioVariableList }) {
       }
     }),
     [ioItems, mcValues, infoByName]
+  )
+
+  const activeWarnings = useMemo(() => {
+    const byKey = Object.fromEntries(warningConfig.map((w) => [w.key, w]))
+    const result = []
+    for (const [name] of ioVariableList) {
+      const addr = extractAddress(name)
+      if (!addr || addr[0] !== 'M') continue
+      if (Number(mcValues[name]) !== 1) continue
+      const preset = byKey[name]
+      result.push(
+        preset
+          ? { key: name, label: preset.label, level: preset.level }
+          : {
+              key: name,
+              label: infoByName[name]?.description?.trim() || name.replace(/_[MXY][0-9A-F]+$/i, '') || name,
+              level: 'info',
+            }
+      )
+    }
+    return result
+  }, [warningConfig, ioVariableList, mcValues, infoByName])
+
+  const warningCounts = useMemo(() => ({
+    critical: activeWarnings.filter((w) => w.level === 'critical').length,
+    warning: activeWarnings.filter((w) => w.level === 'warning').length,
+    info: activeWarnings.filter((w) => w.level === 'info').length,
+  }), [activeWarnings])
+
+  const ioSearchParsed = useMemo(() => parseIoSearch(ioSearchStart, ioSearchEnd), [ioSearchStart, ioSearchEnd])
+
+  const ioInputsDisplay = useMemo(
+    () => filterAndSliceBySearch(ioRows.filter((r) => r.dir === '입력'), ioSearchParsed),
+    [ioRows, ioSearchParsed]
+  )
+
+  const ioOutputsDisplay = useMemo(
+    () => ioRows.filter((r) => r.dir === '출력'),
+    [ioRows]
   )
 
   const ioAddressValueMap = useMemo(() => {
@@ -720,6 +803,33 @@ function PlcDashboard({ mcConnected, mcValues, ioVariableList }) {
 
       {activeTab === 'io' && (
         <section className="plc-subview">
+          <article className="plc-sub-card plc-io-search-card">
+            <h3>PLC 입출력 검색</h3>
+            <div className="plc-io-search-row">
+              <input
+                type="text"
+                className="plc-io-search-input"
+                placeholder="300"
+                value={ioSearchStart}
+                onChange={(e) => setIoSearchStart(e.target.value)}
+              />
+              <span className="plc-io-search-sep">~</span>
+              <input
+                type="text"
+                className="plc-io-search-input"
+                placeholder="333"
+                value={ioSearchEnd}
+                onChange={(e) => setIoSearchEnd(e.target.value)}
+              />
+              <span className="plc-io-search-hint">
+                {ioSearchParsed
+                  ? `입력 ${ioInputsDisplay.length}건`
+                  : `기본 입력 ${DEFAULT_IO_PAGE_SIZE}건`}
+                {`, 출력 ${ioOutputsDisplay.length}건`}
+              </span>
+            </div>
+          </article>
+
           <article className="plc-sub-card plc-address-board">
             <h3>주소 대역 모니터 (X/Y)</h3>
             <div className="plc-address-rows">
@@ -746,22 +856,22 @@ function PlcDashboard({ mcConnected, mcValues, ioVariableList }) {
             </div>
           </article>
 
-          <div className="plc-sub-grid plc-sub-grid-4">
-            <article className="plc-sub-card">
-              <h3>활성 입력</h3>
-              <p className="plc-sub-emphasis">{ioStats.inputOn}</p>
+          <div className="plc-io-stats-grid">
+            <article className="plc-io-stat-card">
+              <span className="plc-io-stat-label">활성 입력</span>
+              <strong className="plc-io-stat-value">{ioStats.inputOn}</strong>
             </article>
-            <article className="plc-sub-card">
-              <h3>활성 출력</h3>
-              <p className="plc-sub-emphasis">{ioStats.outputOn}</p>
+            <article className="plc-io-stat-card">
+              <span className="plc-io-stat-label">활성 출력</span>
+              <strong className="plc-io-stat-value">{ioStats.outputOn}</strong>
             </article>
-            <article className="plc-sub-card">
-              <h3>전체 활성점</h3>
-              <p className="plc-sub-emphasis">{ioStats.totalOn}</p>
+            <article className="plc-io-stat-card">
+              <span className="plc-io-stat-label">전체 활성점</span>
+              <strong className="plc-io-stat-value">{ioStats.totalOn}</strong>
             </article>
-            <article className="plc-sub-card">
-              <h3>판독 기준</h3>
-              <p className="plc-sub-emphasis">ON=동작</p>
+            <article className="plc-io-stat-card plc-io-stat-card-meta">
+              <span className="plc-io-stat-label">판독 기준</span>
+              <strong className="plc-io-stat-value">ON=동작</strong>
             </article>
           </div>
 
@@ -769,7 +879,7 @@ function PlcDashboard({ mcConnected, mcValues, ioVariableList }) {
             <article className="plc-sub-card">
               <h3>입력 (센서/인터록)</h3>
               <div className="plc-io-grid">
-                {ioRows.filter((row) => row.dir === '입력').map((row) => (
+                {ioInputsDisplay.map((row) => (
                   <div key={row.key} className={`plc-io-item ${row.on ? 'on' : 'off'}`}>
                     <div className="plc-io-head">
                       <strong>{row.label}</strong>
@@ -789,7 +899,7 @@ function PlcDashboard({ mcConnected, mcValues, ioVariableList }) {
                 <span className={`plc-light green ${Number(mcValues.warningLightGreen_Y14E) === 1 ? 'on' : ''}`}>녹색</span>
               </div>
               <div className="plc-io-grid">
-                {ioRows.filter((row) => row.dir === '출력').map((row) => (
+                {ioOutputsDisplay.map((row) => (
                   <div key={row.key} className={`plc-io-item ${row.on ? 'on' : 'off'}`}>
                     <div className="plc-io-head">
                       <strong>{row.label}</strong>

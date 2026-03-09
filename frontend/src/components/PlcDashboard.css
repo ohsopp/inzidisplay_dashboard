@@ -200,10 +200,114 @@
   color: var(--text-secondary);
 }
 
+.plc-io-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.plc-io-stat-card {
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.65));
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.plc-io-stat-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, rgba(94, 234, 212, 0.6), rgba(94, 234, 212, 0.3));
+  border-radius: 3px 0 0 3px;
+}
+
+.plc-io-stat-card-meta::before {
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.5), rgba(148, 163, 184, 0.2));
+}
+
+.plc-io-stat-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(203, 213, 225, 0.8);
+}
+
+.plc-io-stat-value {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: rgba(241, 245, 249, 0.95);
+  line-height: 1.2;
+}
+
+.plc-io-stat-card-meta .plc-io-stat-value {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.plc-io-search-card {
+  padding: 0.85rem 1rem;
+}
+
+.plc-io-search-card h3 {
+  margin: 0 0 0.5rem;
+}
+
+.plc-io-search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.plc-io-search-input {
+  width: 5rem;
+  min-width: 4rem;
+  flex: none;
+  font-size: 0.88rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+}
+
+.plc-io-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.plc-io-search-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.plc-io-search-sep {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.plc-io-search-hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
 .plc-io-grid {
   margin-top: 0.65rem;
   display: grid;
   gap: 0.5rem;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .plc-io-item {
@@ -1315,7 +1419,8 @@
     grid-template-columns: 1fr;
   }
 
-  .plc-sub-grid-4 {
+  .plc-sub-grid-4,
+  .plc-io-stats-grid {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -1355,7 +1460,8 @@
   }
 
   .plc-sub-grid-2,
-  .plc-sub-grid-4 {
+  .plc-sub-grid-4,
+  .plc-io-stats-grid {
     grid-template-columns: 1fr;
   }
 
