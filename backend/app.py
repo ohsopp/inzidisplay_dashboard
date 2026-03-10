@@ -7,6 +7,8 @@ import sys
 import threading
 import time
 import atexit
+from concurrent.futures import ThreadPoolExecutor
+
 from flask import Flask, Response, request, send_from_directory
 
 from flask_cors import CORS
@@ -32,6 +34,8 @@ mc_state = None  # {"host": str, "port": int} when connected (slave 없음)
 mc_fake_server_proc = None
 # InfluxDB 전용 MC 폴러 (M 1초/값1만, D 50ms·일부 1시간, Y 1초)
 mc_influx_stop_event = None
+# 폴링 스레드별 수신 데이터를 블로킹 없이 즉시 InfluxDB에 저장하기 위한 전용 스레드 풀
+_influx_write_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="influx_write")
 
 # MQTT 센서 (VVB001 진동, TP3237 온도) - 마지막 수신값 (새 SSE 클라이언트용)
 last_sensor_data = {}  # {"VVB001": {"value": ..., "ts": ...}, "TP3237": {...}}
@@ -165,12 +169,15 @@ def health():
 
 def _mc_on_parsed(parsed):
     broadcast("mc_data", {"parsed": parsed})
-    # 동일 데이터를 InfluxDB에 기록 (M: 값 1만, Y: 전부, D: 일반 매회 / 1시간 항목은 1시간마다)
-    try:
-        from influxdb_from_mc import write_parsed_to_influx
-        write_parsed_to_influx(parsed)
-    except Exception as e:
-        print("[InfluxDB] 기록 오류:", e, flush=True)
+    # 폴링 완료 시점(ms 단위 반영)을 타임스탬프로 넘겨 InfluxDB _time이 폴링 주기대로 저장되도록 함
+    ts = time.time()
+    def _write():
+        try:
+            from influxdb_from_mc import write_parsed_to_influx
+            write_parsed_to_influx(parsed, timestamp=ts)
+        except Exception as e:
+            print("[InfluxDB] 기록 오류:", e, flush=True)
+    _influx_write_executor.submit(_write)
 
 
 def _mc_on_error(message):

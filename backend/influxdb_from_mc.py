@@ -16,9 +16,10 @@ _first_write_logged = False
 _dash_only_logged = False  # "수신 데이터가 모두 '-'" 한 번만 출력
 
 
-def write_parsed_to_influx(parsed: dict) -> None:
+def write_parsed_to_influx(parsed: dict, timestamp: float | None = None) -> None:
     """
     MC 폴러에서 받은 parsed {변수명: 값}을 규칙에 따라 InfluxDB에 기록.
+    timestamp: 폴링 완료 시점(초 단위 float, time.time()). None이면 기록 시점 사용.
     """
     global _first_write_logged, _dash_only_logged
     if not parsed:
@@ -34,7 +35,7 @@ def write_parsed_to_influx(parsed: dict) -> None:
         if val == 1 or val == "1" or (isinstance(val, (int, float)) and val == 1):
             m_records.append((name, 1, "M"))
     if m_records:
-        ok = write_plc_batch(m_records)
+        ok = write_plc_batch(m_records, timestamp=timestamp)
         wrote_any = ok or wrote_any
         if not _first_write_logged and not ok:
             print("[InfluxDB] M 기록 실패 (연결/버킷 확인)", flush=True)
@@ -43,7 +44,7 @@ def write_parsed_to_influx(parsed: dict) -> None:
     y_records = [(name, val, "Y") for name, val in parsed.items()
                  if name_to_device.get(name) == "Y" and val != "-"]
     if y_records:
-        ok = write_plc_batch(y_records)
+        ok = write_plc_batch(y_records, timestamp=timestamp)
         wrote_any = ok or wrote_any
         if not _first_write_logged and not ok:
             print("[InfluxDB] Y 기록 실패 (연결/버킷 확인)", flush=True)
@@ -52,7 +53,7 @@ def write_parsed_to_influx(parsed: dict) -> None:
     d_normal = [(name, val, "D") for name, val in parsed.items()
                 if name_to_device.get(name) == "D" and name not in INFLUX_HOURLY_SAVE_NAMES and val != "-"]
     if d_normal:
-        ok = write_plc_batch(d_normal)
+        ok = write_plc_batch(d_normal, timestamp=timestamp)
         wrote_any = ok or wrote_any
         if not _first_write_logged and not ok:
             print("[InfluxDB] D 기록 실패 (연결/버킷 확인)", flush=True)
@@ -64,7 +65,7 @@ def write_parsed_to_influx(parsed: dict) -> None:
         d_hourly = [(name, val, "D") for name, val in parsed.items()
                     if name_to_device.get(name) == "D" and name in INFLUX_HOURLY_SAVE_NAMES and val != "-"]
         if d_hourly:
-            wrote_any = write_plc_batch(d_hourly) or wrote_any
+            wrote_any = write_plc_batch(d_hourly, timestamp=timestamp) or wrote_any
             _last_hourly_write = now
 
     # 첫 수신 시 한 번만 상세 로그 (원인 파악용)

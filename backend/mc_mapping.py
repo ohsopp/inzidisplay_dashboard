@@ -72,6 +72,48 @@ INFLUX_HOURLY_SAVE_NAMES = frozenset({
     "presetCounter_D1817",
 })
 
+# 폴링 주기별 변수명 (대시보드 MC 폴러용)
+# 1초: boolean 전체 + 토탈카운터, 현재생산량, 과부족수량, 카운트수량, 금일가동수량, 금일 가동시간
+POLL_1SEC_NAMES = frozenset({
+    "totalCounter_D1820", "totalCounter_D1821",
+    "currentProduction_D1812", "currentProduction_D1813",
+    "defficiencyQuantity_D1814", "defficiencyQuantity_D1815",
+    "productionCounter_D1810", "productionCounter_D1811",
+    "todayStrokeCount_D1912", "todayStrokeCount_D1913",
+    "todayRunningTime_D1914",
+})
+# 1분: C.P.M, S.P.M
+POLL_1MIN_NAMES = frozenset({"cPMCyclePerMinute_D104", "strokePerMinute_D126"})
+# 1시간: 현재/다음 금형번호·금형이름·다이하이트·바란스에어압력, 생산계획량(목표 타발수)
+POLL_1HOUR_NAMES = INFLUX_HOURLY_SAVE_NAMES
+
+
+def get_mc_entries_by_poll_interval():
+    """
+    폴링 주기별로 엔트리 분리 반환.
+    반환: (entries_50ms, entries_1s, entries_1min, entries_1h)
+    - 1s: Boolean 전체 + POLL_1SEC_NAMES
+    - 1min: POLL_1MIN_NAMES (C.P.M, S.P.M)
+    - 1h: POLL_1HOUR_NAMES (금형/다이/바란스/생산계획·목표타발)
+    - 50ms: 나머지 전부
+    """
+    entries = get_mc_entries()
+    e_1h = []
+    e_1min = []
+    e_1s = []
+    e_50ms = []
+    for e in entries:
+        name, dev, addr, data_type, length = e
+        if name in POLL_1HOUR_NAMES:
+            e_1h.append(e)
+        elif name in POLL_1MIN_NAMES:
+            e_1min.append(e)
+        elif (data_type or "").strip().lower() == "boolean" or name in POLL_1SEC_NAMES:
+            e_1s.append(e)
+        else:
+            e_50ms.append(e)
+    return (e_50ms, e_1s, e_1min, e_1h)
+
 
 def get_mc_entries_by_device(device: str, exclude_hourly_d: bool = False):
     """

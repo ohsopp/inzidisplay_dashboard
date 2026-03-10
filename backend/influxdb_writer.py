@@ -2,6 +2,8 @@
 PLC 수집 데이터를 InfluxDB 2.x에 기록.
 measurement: plc, tag: variable=이름, field: value (숫자/문자)
 """
+from datetime import datetime, timezone
+
 from influxdb_config import INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, INFLUX_BUCKET, is_configured
 
 _client = None
@@ -51,10 +53,12 @@ def write_plc_point(variable: str, value, device_type: str = ""):
         return False
 
 
-def write_plc_batch(records: list):
+def write_plc_batch(records: list, timestamp: float | None = None):
     """
     records: [(variable, value, device_type?), ...]
     device_type 생략 시 "" 사용.
+    timestamp: 폴링 완료 시점(초 단위 float, time.time()). None이면 기록 시점 사용.
+               설정 시 UTC datetime으로 변환해 각 Point의 _time에 ms 단위까지 저장.
     """
     api = _get_client()
     if api is None:
@@ -63,6 +67,8 @@ def write_plc_batch(records: list):
         return False
     try:
         from influxdb_client import Point
+        # datetime(UTC)으로 넘겨야 클라이언트가 _time을 초 단위로 잘리지 않고 ms까지 저장함
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp is not None else None
         points = []
         for r in records:
             variable = r[0]
@@ -75,6 +81,8 @@ def write_plc_batch(records: list):
                 p = p.field("value", value)
             else:
                 p = p.field("value_str", str(value))
+            if dt is not None:
+                p = p.time(dt)
             points.append(p)
         api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
         return True
