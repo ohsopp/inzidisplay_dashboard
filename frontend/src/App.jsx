@@ -375,6 +375,14 @@ function App() {
     setCsvExportOpen(true)
   }
 
+  /** 빠른 선택: 최근 N분/시간 기준으로 시작·종료 시간 설정 (KST) */
+  const setCsvExportQuickRange = (minutes) => {
+    const end = new Date()
+    const start = new Date(end.getTime() - minutes * 60 * 1000)
+    setCsvExportStart(formatKstForInput(start))
+    setCsvExportEnd(formatKstForInput(end))
+  }
+
   const handleCsvExportDownload = async () => {
     const start = csvExportStart.trim()
     const end = csvExportEnd.trim()
@@ -515,52 +523,79 @@ function App() {
       </header>
 
       {csvExportOpen && (
-        <div className="modal-overlay" onClick={() => setCsvExportOpen(false)} aria-hidden="false">
+        <div className="modal-overlay csv-export-overlay" onClick={() => setCsvExportOpen(false)} aria-hidden="false">
           <div className="modal csv-export-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>InfluxDB 데이터 CSV 다운로드</h3>
-            <p className="modal-desc">폴링 주기 그룹을 선택하고, 조회 기간(시작·종료)을 설정한 뒤 다운로드하세요. (KST 기준, 행=변수·열=타임스탬프)</p>
-            <div className="control-row">
-              <div className="field-group">
-                <label htmlFor="csv-group">폴링 주기 그룹</label>
-                <select
-                  id="csv-group"
-                  value={csvExportGroup}
-                  onChange={(e) => setCsvExportGroup(e.target.value)}
-                >
-                  <option value="50ms">50ms</option>
-                  <option value="1s">1s</option>
-                  <option value="1min">1min</option>
-                  <option value="1h">1h</option>
-                </select>
-              </div>
+            <div className="csv-modal-header">
+              <h3 className="csv-modal-title">CSV 내보내기</h3>
+              <p className="csv-modal-subtitle">InfluxDB 저장 데이터를 기간·폴링 그룹별로 다운로드합니다. (KST 기준)</p>
             </div>
-            <div className="control-row">
-              <div className="field-group">
-                <label htmlFor="csv-start">시작 시간 (KST)</label>
-                <input
-                  id="csv-start"
-                  type="datetime-local"
-                  value={csvExportStart}
-                  onChange={(e) => setCsvExportStart(e.target.value)}
-                />
+            <section className="csv-modal-section">
+              <span className="csv-modal-label">폴링 주기 그룹</span>
+              <div className="csv-group-options" role="group" aria-label="폴링 주기 선택">
+                {['50ms', '1s', '1min', '1h'].map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    className={`csv-group-option ${csvExportGroup === g ? 'active' : ''}`}
+                    onClick={() => setCsvExportGroup(g)}
+                  >
+                    {g}
+                  </button>
+                ))}
               </div>
-              <div className="field-group">
-                <label htmlFor="csv-end">종료 시간 (KST)</label>
-                <input
-                  id="csv-end"
-                  type="datetime-local"
-                  value={csvExportEnd}
-                  onChange={(e) => setCsvExportEnd(e.target.value)}
-                />
+            </section>
+            <section className="csv-modal-section">
+              <span className="csv-modal-label">조회 기간 (KST)</span>
+              <div className="csv-datetime-row">
+                <div className="csv-field">
+                  <label htmlFor="csv-start">시작</label>
+                  <input
+                    id="csv-start"
+                    type="datetime-local"
+                    value={csvExportStart}
+                    onChange={(e) => setCsvExportStart(e.target.value)}
+                  />
+                </div>
+                <span className="csv-datetime-sep">~</span>
+                <div className="csv-field">
+                  <label htmlFor="csv-end">종료</label>
+                  <input
+                    id="csv-end"
+                    type="datetime-local"
+                    value={csvExportEnd}
+                    onChange={(e) => setCsvExportEnd(e.target.value)}
+                  />
+                </div>
               </div>
-            </div>
-            {csvExportError && <p className="error-message">{csvExportError}</p>}
-            <div className="modal-actions">
-              <button type="button" className="btn btn-primary" onClick={handleCsvExportDownload} disabled={csvExportLoading}>
-                {csvExportLoading ? '다운로드 중…' : 'CSV 다운로드'}
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setCsvExportOpen(false)}>
+              <div className="csv-quick-range">
+                <span className="csv-quick-label">빠른 선택</span>
+                <div className="csv-quick-btns">
+                  {[
+                    [1, '최근 1분'],
+                    [5, '최근 5분'],
+                    [30, '최근 30분'],
+                    [60, '최근 1시간'],
+                    [24 * 60, '최근 24시간'],
+                  ].map(([mins, label]) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      className="csv-quick-btn"
+                      onClick={() => setCsvExportQuickRange(mins)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+            {csvExportError && <p className="csv-modal-error">{csvExportError}</p>}
+            <div className="csv-modal-actions">
+              <button type="button" className="btn btn-secondary csv-modal-cancel" onClick={() => setCsvExportOpen(false)}>
                 취소
+              </button>
+              <button type="button" className="btn btn-primary csv-modal-download" onClick={handleCsvExportDownload} disabled={csvExportLoading}>
+                {csvExportLoading ? '다운로드 중…' : 'CSV 다운로드'}
               </button>
             </div>
           </div>
