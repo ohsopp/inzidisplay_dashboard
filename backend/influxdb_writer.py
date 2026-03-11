@@ -220,35 +220,82 @@ def export_plc_csv_pivot(start_iso: str, end_iso: str, group_key: str) -> tuple[
         tables = query_api.query(query, org=INFLUX_ORG)
     except Exception as e:
         return None, str(e)
-    # (variable, time) -> value (마지막 값 사용; 동일 시점 중복 시 덮어씀)
+    from datetime import datetime, timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+
+    def _time_to_utc_key(raw) -> str | None:
+        """InfluxDB _time(문자열 또는 datetime) → UTC 기준 정규화 키 문자열."""
+        if raw is None:
+            return None
+        if hasattr(raw, "year"):  # datetime
+            dt = raw
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+        s = str(raw).strip()
+        if not s:
+            return None
+        try:
+            s = s.replace("Z", "+00:00").replace(" ", "T")
+            if "+00:00" not in s and s[-6:] != "-00:00":
+                s = s + "+00:00"
+            if "." in s and "+" in s:
+                i, j = s.index("."), s.index("+")
+                if j - i > 7:
+                    s = s[: i + 7] + s[j:]
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+        except Exception:
+            return None
+
+    def _utc_key_to_kst_display(utc_iso: str) -> str:
+        """UTC iso 키 → KST 표시 (YYYY-MM-DD HH:MM:SS)."""
+        if not utc_iso:
+            return utc_iso
+        try:
+            s = utc_iso.replace("Z", "+00:00").replace(" ", "T")
+            if "+00:00" not in s and s[-6:] != "-00:00":
+                s = s + "+00:00"
+            if "." in s and "+" in s:
+                i, j = s.index("."), s.index("+")
+                if j - i > 7:
+                    s = s[: i + 7] + s[j:]
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return utc_iso
+
+    # (variable, time_utc_key) -> value
     data: dict[tuple[str, str], str] = {}
-    timestamps_set: set[str] = set()
     for table in tables or []:
         for record in getattr(table, "records", []) or []:
             vals = getattr(record, "values", {}) or {}
-            t = vals.get("_time", "")
+            t_key = _time_to_utc_key(vals.get("_time"))
             var = vals.get("variable", "")
             val = vals.get("_value", "")
             if isinstance(val, (int, float)):
                 val = str(val)
             else:
                 val = str(val) if val is not None else ""
-            if var and t:
-                data[(var, t)] = val
-                timestamps_set.add(t)
+            if var and t_key:
+                data[(var, t_key)] = val
     var_names = get_variable_names_by_poll_interval().get(group_key, [])
     if not var_names:
         return None, f"해당 그룹({group_key})에 변수가 없습니다."
-    # 그룹 순서대로 행 출력; 데이터에만 있는 변수는 그룹 목록 뒤에 추가
+    allowed = frozenset(var_names)
+    data_filtered = {k: v for k, v in data.items() if k[0] in allowed}
     ordered_vars = list(var_names)
-    for (v, _) in data:
-        if v not in ordered_vars:
-            ordered_vars.append(v)
-    timestamps = sorted(timestamps_set)
+    timestamps_with_data = sorted({t for (v, t) in data_filtered})
+    # CSV 열 헤더: 모든 타임스탬프를 KST로 표시
+    kst_headers = [_utc_key_to_kst_display(t) for t in timestamps_with_data]
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["variable"] + timestamps)
+    writer.writerow(["variable"] + kst_headers)
     for var in ordered_vars:
-        row = [var] + [data.get((var, t), "") for t in timestamps]
+        row = [var] + [data_filtered.get((var, t), "") for t in timestamps_with_data]
         writer.writerow(row)
     return out.getvalue(), None

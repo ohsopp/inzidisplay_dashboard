@@ -27,13 +27,19 @@ def write_parsed_to_influx(parsed: dict, timestamp: float | None = None) -> None
     name_to_device = get_name_to_device()
     wrote_any = False
 
-    # M: 값이 1인 경우만
+    # M: 0/1 모두 기록 (CSV에서 0도 표시되도록)
     m_records = []
     for name, val in parsed.items():
         if name_to_device.get(name) != "M":
             continue
-        if val == 1 or val == "1" or (isinstance(val, (int, float)) and val == 1):
-            m_records.append((name, 1, "M"))
+        if val == "-" or val is None:
+            continue
+        try:
+            v = int(float(val)) if isinstance(val, str) else int(val)
+            if v in (0, 1):
+                m_records.append((name, v, "M"))
+        except (TypeError, ValueError):
+            pass
     if m_records:
         ok = write_plc_batch(m_records, timestamp=timestamp)
         wrote_any = ok or wrote_any

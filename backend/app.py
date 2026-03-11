@@ -43,6 +43,19 @@ last_sensor_data = {}  # {"VVB001": {"value": ..., "ts": ...}, "TP3237": {...}}
 mqtt_status = {"connected": False, "error": ""}  # 새로 접속 시 화면에 표시용
 
 
+def _get_run_poller():
+    """mc_connect 첫 요청 시 임포트 지연 방지."""
+    try:
+        from mc_poller import run_poller
+        return run_poller
+    except ImportError:
+        _d = os.path.dirname(os.path.abspath(__file__))
+        if _d not in sys.path:
+            sys.path.insert(0, _d)
+        from mc_poller import run_poller
+        return run_poller
+
+
 def _bootstrap_poll_rates_from_postgres():
     """
     PostgreSQL에 저장된 폴링레이트가 있으면 앱 시작 시 메모리에 반영.
@@ -219,8 +232,8 @@ def mc_connect():
     if request.method == "OPTIONS":
         return "", 204
 
-    global mc_thread, mc_stop_event, mc_state, mc_influx_stop_event
     try:
+        global mc_thread, mc_stop_event, mc_state, mc_influx_stop_event
         data = request.get_json(silent=True) or {}
         host = (data.get("host") or "127.0.0.1").strip()
         port = int(data.get("port", 5002))
@@ -233,15 +246,9 @@ def mc_connect():
     _start_fake_server_async(host, port)
 
     try:
-        from mc_poller import run_poller
-    except ImportError:
-        _backend_dir = os.path.dirname(os.path.abspath(__file__))
-        if _backend_dir not in sys.path:
-            sys.path.insert(0, _backend_dir)
-        try:
-            from mc_poller import run_poller
-        except ImportError:
-            return {"error": "mc_poller를 불러올 수 없습니다."}, 500
+        run_poller = _get_run_poller()
+    except Exception as e:
+        return {"error": "mc_poller를 불러올 수 없습니다: %s" % e}, 500
 
     try:
         mc_stop_event = threading.Event()
@@ -252,12 +259,12 @@ def mc_connect():
         )
         mc_thread.start()
         mc_state = {"host": host, "port": port}
-        # InfluxDB는 대시보드 폴러와 동일한 수신 데이터로 기록 (mc_connect 시 별도 폴러 없음)
         mc_influx_stop_event = None
-        print("[MC] 연결됨 %s:%s → 폴링 시작 후 수신 데이터가 InfluxDB에 자동 기록됩니다." % (host, port), flush=True)
+        print("[MC] 연결됨 %s:%s → 폴링 시작" % (host, port), flush=True)
         broadcast("mc_connected", mc_state)
         return {"ok": True}
     except Exception as e:
+        print("[MC] connect 예외:", e, flush=True)
         return {"error": str(e)}, 500
 
 
@@ -440,6 +447,10 @@ if os.path.isdir(_FRONTEND_DIST):
 
 
 if __name__ == "__main__":
+    try:
+        _get_run_poller()
+    except Exception:
+        pass
     try:
         from influxdb_writer import check_connection
         from influxdb_config import INFLUX_URL
