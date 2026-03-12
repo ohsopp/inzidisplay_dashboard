@@ -19,7 +19,7 @@ except ImportError:
     from vibration_decode import parse_hex_to_temperature, decode_vvb001, PDIN_PATHS
 
 # 기본 브로커 설정 (Consumer 설정의 Broker/Server 기준)
-MQTT_BROKER = "192.168.1.101"
+MQTT_BROKER = "192.168.0.3"
 MQTT_PORT = 1883
 TOPICS = ["VVB001", "TP3237"]  # 진동, 온도
 
