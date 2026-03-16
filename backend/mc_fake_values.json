@@ -3,7 +3,7 @@
   "Y14C": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 1,
+    "value": 0,
     "name": "warningLightRed_Y14C"
   },
   "Y14D": {
@@ -771,7 +771,7 @@
   "D100": {
     "dataType": "Word",
     "length": 1,
-    "value": 186,
+    "value": 180,
     "name": "pressAngle_D100"
   },
   "D104": {

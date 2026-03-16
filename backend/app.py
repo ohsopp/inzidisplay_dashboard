@@ -357,6 +357,49 @@ def mc_poll_rates_update():
         return {"error": str(e)}, 500
 
 
+@app.route("/api/mc/fake-values", methods=["GET"])
+def mc_fake_values_list():
+    """
+    MC 가짜값 편집용 목록 조회.
+    프론트 드롭다운 옵션/현재값/최소최대 표시용.
+    """
+    try:
+        from mc_fake_store import list_editable_entries
+        return {"entries": list_editable_entries()}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+@app.route("/api/mc/fake-values", methods=["POST", "OPTIONS"])
+def mc_fake_values_update():
+    """
+    MC 가짜값 일괄 수정.
+    payload: { updates: [{ name: string, value: any }, ...] }
+    """
+    if request.method == "OPTIONS":
+        return "", 204
+    try:
+        data = request.get_json(silent=True) or {}
+        updates = data.get("updates") or []
+    except Exception as e:
+        return {"error": f"잘못된 요청: {e}"}, 400
+
+    try:
+        from mc_fake_store import apply_updates
+        applied, errors = apply_updates(updates)
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+    # 저장 성공 값은 즉시 브로드캐스트해 MC 탭/대시보드에 바로 반영한다.
+    if applied:
+        parsed = {item["name"]: item["value"] for item in applied}
+        broadcast("mc_data", {"parsed": parsed})
+
+    if errors:
+        return {"error": "일부 항목 저장 실패", "applied": applied, "errors": errors}, 400
+    return {"ok": True, "applied": applied}
+
+
 @app.route("/api/influxdb/status", methods=["GET"])
 def influxdb_status():
     """InfluxDB 연결 상태 확인 (연결 시도 후 결과 반환)."""

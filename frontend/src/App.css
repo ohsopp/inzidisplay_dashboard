@@ -559,6 +559,92 @@
 .mc-control .field-group { min-width: 8rem; }
 .mc-status { margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; }
 
+.mc-edit-control {
+  margin-bottom: 0.75rem;
+  padding: 1rem 1.25rem;
+}
+
+.mc-edit-modal {
+  min-width: min(980px, 92vw);
+  max-width: min(980px, 92vw);
+}
+
+.mc-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.mc-edit-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.mc-edit-hint {
+  margin: 0 0 0.85rem 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.mc-edit-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(220px, 2fr) minmax(140px, 1fr) minmax(150px, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.mc-edit-select,
+.mc-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+}
+
+.mc-edit-select:focus,
+.mc-edit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.mc-edit-range {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.mc-edit-remove {
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.mc-edit-ok {
+  margin: 0.6rem 0 0 0;
+  color: var(--success);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 980px) {
+  .mc-edit-modal {
+    min-width: 94vw;
+    max-width: 94vw;
+  }
+  .mc-edit-row {
+    grid-template-columns: 1fr;
+  }
+  .mc-edit-range {
+    white-space: normal;
+  }
+}
+
 /* 센서 대시보드 */
 /* 센서 대시보드 */
 .dashboard-view { padding: 0; }
