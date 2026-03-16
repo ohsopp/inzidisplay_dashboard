@@ -164,36 +164,55 @@ def match_request(body: bytes, config: dict) -> str | None:
                 offset += 4
     return None
 
-REQUEST_BODY_LEN = 12
-MIN_REQUEST_LEN = RESPONSE_HEADER_LEN + REQUEST_BODY_LEN  # 21
+def _recv_exact(conn: socket.socket, size: int) -> bytes | None:
+    """요청 프레임 파싱용 고정 길이 수신. 연결 종료 시 None."""
+    data = b""
+    while len(data) < size:
+        chunk = conn.recv(size - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
 
 
 def handle_client(conn: socket.socket):
-    data = b""
-    while len(data) < MIN_REQUEST_LEN:
-        chunk = conn.recv(4096)
-        if not chunk:
+    """
+    한 TCP 연결에서 여러 3E 요청을 연속 처리한다.
+    실제 pymcprotocol은 연결을 유지한 채 연속 요청을 보내므로,
+    요청 1건 처리 후 연결을 닫으면 일부 값이 0/'-'로 깨질 수 있다.
+    """
+    while True:
+        header = _recv_exact(conn, RESPONSE_HEADER_LEN)
+        if header is None:
             return
-        data += chunk
-    body = data[RESPONSE_HEADER_LEN : MIN_REQUEST_LEN]
-    if len(body) < 12:
-        print(f"  → 바디 부족: {len(body)} bytes, hex={body.hex()}")
-        return
-    config = load_mc_fake_values()
-    kind = match_request(body, config)
-    if kind and kind in config:
-        read_data = build_read_data_from_entry(config[kind])
-    else:
-        read_data = word_to_le_bytes(0)
-        if kind is None:
-            addr = body[6] | (body[7] << 8) | (body[8] << 16)
-            device = body[9]
-            points = body[10] | (body[11] << 8)
-            print(f"  → 미매칭: body(hex)={body.hex()}, addr=0x{addr:X} device=0x{device:X} points={points}")
-    resp = build_3e_response(read_data)
-    conn.sendall(resp)
-    if kind:
-        print(f"  → {kind}, read_data={read_data.hex()}, 응답 {len(resp)} bytes")
+        if len(header) < RESPONSE_HEADER_LEN:
+            return
+        req_body_len = int.from_bytes(header[7:9], "little")
+        if req_body_len <= 0:
+            return
+        body = _recv_exact(conn, req_body_len)
+        if body is None:
+            return
+        if len(body) < 12:
+            print(f"  → 바디 부족: {len(body)} bytes, hex={body.hex()}")
+            continue
+
+        config = load_mc_fake_values()
+        kind = match_request(body, config)
+        if kind and kind in config:
+            read_data = build_read_data_from_entry(config[kind])
+        else:
+            read_data = word_to_le_bytes(0)
+            if kind is None:
+                addr = body[6] | (body[7] << 8) | (body[8] << 16)
+                device = body[9]
+                points = body[10] | (body[11] << 8)
+                print(f"  → 미매칭: body(hex)={body.hex()}, addr=0x{addr:X} device=0x{device:X} points={points}")
+
+        resp = build_3e_response(read_data)
+        conn.sendall(resp)
+        if kind:
+            print(f"  → {kind}, read_data={read_data.hex()}, 응답 {len(resp)} bytes")
 
 
 def main():

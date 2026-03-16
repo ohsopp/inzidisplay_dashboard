@@ -222,16 +222,16 @@ function App() {
   const [serverConnected, setServerConnected] = useState(false)
   const [activeView, setActiveView] = useState('plc') // 'plc' | 'mc' | 'dashboard'
   const [ioVariableList, setIoVariableList] = useState([]) // [ [name, lengthBit], ... ]
-  const [showBitsCol, setShowBitsCol] = useState(true)
-  const [showHexCol, setShowHexCol] = useState(true)
+  const [showBitsCol, setShowBitsCol] = useState(false)
+  const [showHexCol, setShowHexCol] = useState(false)
   const [showValueCol, setShowValueCol] = useState(true)
-  const [showMetaBit, setShowMetaBit] = useState(true)
-  const [showMetaType, setShowMetaType] = useState(true)
+  const [showMetaBit, setShowMetaBit] = useState(false)
+  const [showMetaType, setShowMetaType] = useState(false)
   const [showMetaDesc, setShowMetaDesc] = useState(true)
   const [mcValues, setMcValues] = useState({})
   const [mcConnected, setMcConnected] = useState(false)
   const [mcError, setMcError] = useState('')
-  const [mcHost, setMcHost] = useState('192.168.0.5')
+  const [mcHost, setMcHost] = useState('127.0.0.1')
   const [mcPort, setMcPort] = useState('5002')
   const [sensorTrend, setSensorTrend] = useState({ VVB001: [], TP3237: [] }) // { topic: [{ ts, ...metrics }] }
   const [mqttConnected, setMqttConnected] = useState(false)
@@ -745,7 +745,7 @@ function App() {
                         type="text"
                         value={mcHost}
                         onChange={(e) => setMcHost(e.target.value)}
-                        placeholder="192.168.0.5"
+                        placeholder="127.0.0.1"
                         disabled={mcConnected}
                       />
                     </div>
