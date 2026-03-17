@@ -5,11 +5,11 @@ import SensorTrendCharts from './components/SensorTrendCharts'
 import McEditModal from './components/McEditModal'
 import useMcEditEditor from './hooks/useMcEditEditor'
 
-// 배포 시 요청 보낼 백엔드 주소 (끝에 / 없이). 아래를 실제 서버 도메인·IP로 바꾸세요. 예: https://api.example.com 또는 http://123.45.67.89:6006
-// 443(Nginx HTTPS) 사용. 6005는 HTTP 전용이라 https 쓰면 ERR_SSL_PROTOCOL_ERROR 발생
-const PRODUCTION_API_URL = 'https://uitsolutions.iptime.org'
-// 개발: 호스트:6005. 배포: PRODUCTION_API_URL 사용
-const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL.replace(/\/$/, '')
+// 배포(Vercel): 같은 도메인(/api)으로 호출하고, vercel.json rewrites로 백엔드(6006)로 프록시한다.
+// 필요하면 VITE_PRODUCTION_API_URL로 절대 URL을 덮어쓸 수 있다.
+const PRODUCTION_API_URL = (import.meta.env.VITE_PRODUCTION_API_URL || '').replace(/\/$/, '')
+// 개발: 로컬 백엔드(6005). 배포: 기본값은 상대경로('')라서 /api/* 호출.
+const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL
 const SENSOR_TREND_MAX_POINTS = 240
 
 function hexToBytes(hex) {
