@@ -1,0 +1,33 @@
+# PLC 모니터 백엔드 — Gunicorn systemd 서비스
+# 설치: sudo cp deploy/plc-backend.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable plc-backend && sudo systemctl start plc-backend
+#
+# 경로: 현재 프로젝트 기준 (배포 서버 경로가 다르면 수정)
+
+[Unit]
+Description=PLC Monitor Backend (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=uit
+Group=uit
+WorkingDirectory=/home/uit/plc/plc_test/backend
+
+Environment=PATH=/home/uit/plc/plc_test/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PGHOST=127.0.0.1
+Environment=PGPORT=5432
+Environment=PGDATABASE=plc_test
+Environment=PGUSER=plc_app
+Environment=PGPASSWORD=CHANGE_ME
+Environment=INFLUX_URL=http://127.0.0.1:8086
+Environment=INFLUX_TOKEN=CHANGE_ME
+Environment=INFLUX_ORG=plc
+Environment=INFLUX_BUCKET=plc_data
+
+ExecStart=/home/uit/plc/plc_test/backend/venv/bin/gunicorn -c gunicorn_config.py app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

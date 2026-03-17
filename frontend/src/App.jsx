@@ -5,8 +5,10 @@ import SensorTrendCharts from './components/SensorTrendCharts'
 import McEditModal from './components/McEditModal'
 import useMcEditEditor from './hooks/useMcEditEditor'
 
-// 개발 모드: 접속한 호스트(로컬/원격)의 6005 사용 → SSH로 서버 IP 접속해도 API 연결됨
-const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : window.location.origin
+// 배포 시 요청 보낼 백엔드 주소 (끝에 / 없이). 아래를 실제 서버 도메인·IP로 바꾸세요. 예: https://api.example.com 또는 http://123.45.67.89:6006
+const PRODUCTION_API_URL = 'http://uitsolutions.iptime.org:6006'
+// 개발: 호스트:6005. 배포: PRODUCTION_API_URL 사용
+const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL.replace(/\/$/, '')
 const SENSOR_TREND_MAX_POINTS = 240
 
 function hexToBytes(hex) {

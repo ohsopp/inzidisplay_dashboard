@@ -27,7 +27,7 @@
   "Y107": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 0,
+    "value": 1,
     "name": "warningLightRedCircleType_Y107"
   },
   "Y109": {
