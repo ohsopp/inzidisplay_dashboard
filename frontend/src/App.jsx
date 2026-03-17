@@ -6,7 +6,8 @@ import McEditModal from './components/McEditModal'
 import useMcEditEditor from './hooks/useMcEditEditor'
 
 // 배포 시 요청 보낼 백엔드 주소 (끝에 / 없이). 아래를 실제 서버 도메인·IP로 바꾸세요. 예: https://api.example.com 또는 http://123.45.67.89:6006
-const PRODUCTION_API_URL = 'https://uitsolutions.iptime.org:6005'
+// 443(Nginx HTTPS) 사용. 6005는 HTTP 전용이라 https 쓰면 ERR_SSL_PROTOCOL_ERROR 발생
+const PRODUCTION_API_URL = 'https://uitsolutions.iptime.org'
 // 개발: 호스트:6005. 배포: PRODUCTION_API_URL 사용
 const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL.replace(/\/$/, '')
 const SENSOR_TREND_MAX_POINTS = 240
