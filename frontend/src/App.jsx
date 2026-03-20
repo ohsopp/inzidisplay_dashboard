@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import './App.css'
 import PlcDashboard from './components/PlcDashboard'
 import SensorTrendCharts from './components/SensorTrendCharts'

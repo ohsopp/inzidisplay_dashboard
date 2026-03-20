@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import React, { useId, useMemo, useRef, useState } from 'react'
 import './SensorTrendCharts.css'
 
 const VIBRATION_LINES = [

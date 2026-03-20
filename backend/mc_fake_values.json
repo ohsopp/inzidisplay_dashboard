@@ -9,7 +9,7 @@
   "Y14D": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 0,
+    "value": 1,
     "name": "warningLightYellow_Y14D"
   },
   "Y14E": {
@@ -33,13 +33,13 @@
   "Y109": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 0,
+    "value": 1,
     "name": "melodyPhone_Y109"
   },
   "M300": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 0,
+    "value": 1,
     "name": "emergencyStopRF_M300"
   },
   "M301": {
@@ -57,7 +57,7 @@
   "M303": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 1,
+    "value": 0,
     "name": "emergencyStopLR_M303"
   },
   "M304": {
@@ -93,7 +93,7 @@
   "M309": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 1,
+    "value": 0,
     "name": "clutchValveError_M309"
   },
   "M310": {
@@ -633,7 +633,7 @@
   "M399": {
     "dataType": "Boolean",
     "length": 1,
-    "value": 0,
+    "value": 1,
     "name": "dAUnitError_M399"
   },
   "D140": {
@@ -789,7 +789,7 @@
   "D340": {
     "dataType": "Word",
     "length": 1,
-    "value": 438,
+    "value": 455,
     "name": "crankShaftTempRightFront_D340"
   },
   "D341": {
