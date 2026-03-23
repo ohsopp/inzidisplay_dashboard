@@ -2,6 +2,13 @@
 MC 프로토콜(3E) 폴링. 웹 대시보드에서 폴링 시작 시 host:port(가짜/실제 PLC)에 3E 요청을 보내
 수신값을 대시보드·InfluxDB에 전달합니다.
 주기별 4개 스레드: 50ms / 1s / 1min / 1h. 같은 주기 내에서는 100개씩 청크·2스레드 병렬 읽기.
+
+연결 직후: 전체 변수를 단일 TCP 세션·순차 읽기로 1회 스냅샷(MC_BOOTSTRAP_SEQUENTIAL_LOAD, 기본 on).
+이후 주기 폴링은 각 스레드가 담당하며, 부트스트랩이 성공하면 첫 주기 폴링은 생략한다.
+
+접속 경합 완화: read_mc_variables 호출을 전역 락으로 직렬화(MC_SERIALIZE_PLC_READS, 기본 on).
+  - 트레이드오프: 동시 다발 연결은 줄지만, 한 번에 하나의 PLC 읽기만 진행된다.
+  - 더 나은 확장: 단일 워커 큐 + 연결 재사용(장시간 연결 유지)은 plc_mcprotocol 쪽 리팩터가 필요하다.
 """
 import os
 import threading
@@ -16,6 +23,19 @@ POLL_ENTRY_LIMIT = int(os.environ.get("MC_POLL_ENTRY_LIMIT", "0") or "0")
 CHUNK_SIZE = int(os.environ.get("MC_POLL_CHUNK_SIZE", "100") or "100")
 MAX_WORKERS = int(os.environ.get("MC_POLL_MAX_WORKERS", "2") or "2")
 FAILED_POLL_RETRY_SEC = float(os.environ.get("MC_FAILED_POLL_RETRY_SEC", "1.0") or "1.0")
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+# 부트스트랩: 연결 직후 전체 엔트리 1회 순차 로드 (기본 True)
+BOOTSTRAP_SEQUENTIAL_LOAD = _env_bool("MC_BOOTSTRAP_SEQUENTIAL_LOAD", True)
+# PLC 읽기 직렬화 — 동시 연결·요청 경합 완화 (기본 True)
+SERIALIZE_PLC_READS = _env_bool("MC_SERIALIZE_PLC_READS", True)
+
+_plc_io_lock = threading.Lock()
 
 INTERVAL_50MS = 0.05
 INTERVAL_1S = 1.0
@@ -34,8 +54,31 @@ _interval_by_key = {
 
 
 def _poll_chunk(host, port, chunk):
-    """한 청크에 대해 read_mc_variables 호출."""
+    """한 청크에 대해 read_mc_variables 호출. SERIALIZE_PLC_READS 시 전역 락으로 직렬화."""
+    if SERIALIZE_PLC_READS:
+        with _plc_io_lock:
+            return read_mc_variables(host, port, chunk)
     return read_mc_variables(host, port, chunk)
+
+
+def _bootstrap_sequential_load(host, port, all_entries, on_parsed, on_error):
+    """
+    전체 엔트리를 한 번의 연결로 순차 읽기. on_parsed(merged, None) — ndjson/주기 태그 없음.
+    성공 시 True (전부 '-'면 False).
+    """
+    if not all_entries:
+        return False
+    try:
+        merged = _poll_chunk(host, port, all_entries)
+        if not merged:
+            return False
+        if all(v == "-" for v in merged.values()):
+            return False
+        on_parsed(merged, None)
+        return True
+    except Exception as e:
+        on_error(str(e))
+        return False
 
 
 def _do_poll_entries(host, port, entries, on_parsed, on_error, interval_key=None):
@@ -110,20 +153,22 @@ def get_poll_thread_entries():
     }
 
 
-def _run_interval_loop(host, port, entries, interval_key, on_parsed, on_error, stop_event, label):
-    """한 주기 스레드: 첫 폴링 1회 후, interval_sec마다 폴링."""
+def _run_interval_loop(host, port, entries, interval_key, on_parsed, on_error, stop_event, label, skip_initial=False):
+    """한 주기 스레드: 첫 폴링 1회 후(또는 skip_initial 시 생략), interval_sec마다 폴링."""
     if not entries:
         return
     interval_sec = get_interval_seconds(interval_key) or MIN_INTERVAL_SEC
     retry_sec = max(MIN_INTERVAL_SEC, min(FAILED_POLL_RETRY_SEC, interval_sec))
     next_wait_sec = interval_sec
-    try:
-        ok = _do_poll_entries(host, port, entries, on_parsed, on_error, interval_key=interval_key)
-        next_wait_sec = interval_sec if ok else retry_sec
-    except Exception as e:
-        on_error(str(e))
-        next_wait_sec = retry_sec
     last_polled_at = time.monotonic()
+    if not skip_initial:
+        try:
+            ok = _do_poll_entries(host, port, entries, on_parsed, on_error, interval_key=interval_key)
+            next_wait_sec = interval_sec if ok else retry_sec
+        except Exception as e:
+            on_error(str(e))
+            next_wait_sec = retry_sec
+        last_polled_at = time.monotonic()
     while not stop_event.is_set():
         # 고정 wait(interval_sec)을 쓰면 긴 주기 대기 중 주기 변경이 즉시 반영되지 않는다.
         # 짧은 tick으로 남은 시간을 재계산해, 1h -> 1s 변경도 빠르게 반영한다.
@@ -168,6 +213,18 @@ def run_poller(host, port, on_parsed, on_error, stop_event):
     print("[MC] 폴링 시작 (총 %d개) 50ms=%d, 1s=%d, 1min=%d, 1h=%d"
           % (total, len(e_50ms), len(e_1s), len(e_1min), len(e_1h)), flush=True)
 
+    all_ordered = e_50ms + e_1s + e_1min + e_1h
+    skip_initial_after_bootstrap = False
+    if BOOTSTRAP_SEQUENTIAL_LOAD and all_ordered:
+        t_boot = time.perf_counter()
+        boot_ok = _bootstrap_sequential_load(host, port, all_ordered, on_parsed, on_error)
+        skip_initial_after_bootstrap = boot_ok
+        print(
+            "[MC] 초기 순차 로드 %s (%.2fs, %d개)"
+            % ("완료" if boot_ok else "실패·미전송(주기 폴링에서 재시도)", time.perf_counter() - t_boot, len(all_ordered)),
+            flush=True,
+        )
+
     threads = []
     for entries, interval_key, label in [
         (e_50ms, "50ms", "50ms"),
@@ -179,7 +236,17 @@ def run_poller(host, port, on_parsed, on_error, stop_event):
             continue
         t = threading.Thread(
             target=_run_interval_loop,
-            args=(host, port, entries, interval_key, on_parsed, on_error, stop_event, label),
+            args=(
+                host,
+                port,
+                entries,
+                interval_key,
+                on_parsed,
+                on_error,
+                stop_event,
+                label,
+                skip_initial_after_bootstrap,
+            ),
             name="mc_poll_%s" % label,
             daemon=True,
         )
