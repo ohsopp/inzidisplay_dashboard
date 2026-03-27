@@ -10,23 +10,42 @@ import useMcEditEditor from './hooks/useMcEditEditor'
 const PRODUCTION_API_URL = (import.meta.env.VITE_PRODUCTION_API_URL || '').replace(/\/$/, '')
 // 개발: 로컬 백엔드(6005). 배포: 기본값은 상대경로('')라서 /api/* 호출.
 const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL
-const API_TOKEN = (import.meta.env.VITE_API_TOKEN || '').trim()
 const SENSOR_TREND_MAX_POINTS = 240
+
+function getApiToken() {
+  const envToken = (import.meta.env.VITE_API_TOKEN || '').trim()
+  if (envToken) return envToken
+  if (typeof window === 'undefined') return ''
+  try {
+    const q = new URLSearchParams(window.location.search)
+    const queryToken = (q.get('token') || q.get('api_token') || '').trim()
+    if (queryToken) {
+      window.localStorage.setItem('api_token', queryToken)
+      return queryToken
+    }
+    const saved = (window.localStorage.getItem('api_token') || '').trim()
+    return saved
+  } catch {
+    return ''
+  }
+}
 
 function buildApiUrl(path) {
   return `${API_URL}${path}`
 }
 
 function buildEventsUrl() {
+  const token = getApiToken()
   const base = buildApiUrl('/api/events')
-  if (!API_TOKEN) return base
+  if (!token) return base
   const sep = base.includes('?') ? '&' : '?'
-  return `${base}${sep}token=${encodeURIComponent(API_TOKEN)}`
+  return `${base}${sep}token=${encodeURIComponent(token)}`
 }
 
 async function apiFetch(path, options = {}) {
+  const token = getApiToken()
   const mergedHeaders = {
-    ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   }
   return fetch(buildApiUrl(path), { ...options, headers: mergedHeaders })
