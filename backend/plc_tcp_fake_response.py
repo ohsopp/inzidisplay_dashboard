@@ -7,7 +7,7 @@ JSON에서 키(예: M300, D140)와 value를 수정하면 요청 시마다 파일
 해당 값으로 응답합니다. 대시보드 폴링 시 JSON 값이 그대로 표시됩니다.
 
 사용법:
-  1) mc_fake_values.json에 디바이스+주소 키와 value 추가/수정 (예: "M300": {"dataType":"Boolean","length":1,"value":1})
+  1) mc_fake_values.json에 디 바이스+주소 키와 value 추가/수정 (예: "M300": {"dataType":"Boolean","length":1,"value":1})
   2) 이 서버 실행: python3 backend/plc_tcp_fake_response.py
   3) 클라이언트는 PLC 대신 이 PC IP + 5002 로 연결
 """
