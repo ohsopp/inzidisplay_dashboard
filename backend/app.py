@@ -164,7 +164,8 @@ def sse_stream(client_queue):
     try:
         while True:
             try:
-                msg = client_queue.get(timeout=30)
+                # Disconnect 감지를 빠르게 하기 위해 heartbeat 대기시간을 짧게 둔다.
+                msg = client_queue.get(timeout=5)
                 yield f"event: {msg['event']}\ndata: {json.dumps(msg['data'])}\n\n"
             except queue.Empty:
                 yield ": heartbeat\n\n"

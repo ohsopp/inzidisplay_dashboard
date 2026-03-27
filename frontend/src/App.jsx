@@ -345,6 +345,16 @@ function App() {
 
   useEffect(() => {
     let isUnmounted = false
+    const closeEventSource = () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
+      }
+    }
 
     const connectEventSource = () => {
       if (isUnmounted) return
@@ -459,16 +469,14 @@ function App() {
     }
 
     connectEventSource()
+    // 탭 종료/페이지 이탈 시 즉시 close를 호출해 유령 SSE 연결 정리를 앞당긴다.
+    window.addEventListener('pagehide', closeEventSource)
+    window.addEventListener('beforeunload', closeEventSource)
     return () => {
       isUnmounted = true
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current)
-        reconnectTimerRef.current = null
-      }
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close()
-        eventSourceRef.current = null
-      }
+      window.removeEventListener('pagehide', closeEventSource)
+      window.removeEventListener('beforeunload', closeEventSource)
+      closeEventSource()
     }
   }, [])
 
