@@ -10,7 +10,27 @@ import useMcEditEditor from './hooks/useMcEditEditor'
 const PRODUCTION_API_URL = (import.meta.env.VITE_PRODUCTION_API_URL || '').replace(/\/$/, '')
 // 개발: 로컬 백엔드(6005). 배포: 기본값은 상대경로('')라서 /api/* 호출.
 const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL
+const API_TOKEN = (import.meta.env.VITE_API_TOKEN || '').trim()
 const SENSOR_TREND_MAX_POINTS = 240
+
+function buildApiUrl(path) {
+  return `${API_URL}${path}`
+}
+
+function buildEventsUrl() {
+  const base = buildApiUrl('/api/events')
+  if (!API_TOKEN) return base
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}token=${encodeURIComponent(API_TOKEN)}`
+}
+
+async function apiFetch(path, options = {}) {
+  const mergedHeaders = {
+    ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
+    ...(options.headers || {}),
+  }
+  return fetch(buildApiUrl(path), { ...options, headers: mergedHeaders })
+}
 
 function hexToBytes(hex) {
   const s = String(hex).replace(/\s/g, '')
@@ -310,7 +330,7 @@ function App() {
 
     const connectEventSource = () => {
       if (isUnmounted) return
-      const es = new EventSource(`${API_URL}/api/events`)
+      const es = new EventSource(buildEventsUrl())
       eventSourceRef.current = es
 
       es.onopen = () => {
@@ -441,7 +461,7 @@ function App() {
         host: mcHost.trim(),
         port: parseInt(mcPort, 10) || 5002,
       }
-      const res = await fetch(`${API_URL}/api/mc/connect`, {
+      const res = await apiFetch('/api/mc/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -455,7 +475,7 @@ function App() {
 
   const handleMcDisconnect = async () => {
     try {
-      await fetch(`${API_URL}/api/mc/disconnect`, { method: 'POST' })
+      await apiFetch('/api/mc/disconnect', { method: 'POST' })
     } catch {
       // ignore
     }
@@ -503,7 +523,7 @@ function App() {
     setCsvExportError('')
     setCsvExportLoading(true)
     try {
-      const res = await fetch(`${API_URL}/api/influxdb/export-csv?start=${startISO}&end=${endISO}&group=${groupEnc}`, {
+      const res = await apiFetch(`/api/influxdb/export-csv?start=${startISO}&end=${endISO}&group=${groupEnc}`, {
         method: 'GET',
       })
       if (!res.ok) {
