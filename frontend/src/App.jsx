@@ -3,6 +3,7 @@ import './App.css'
 import PlcDashboard from './components/PlcDashboard'
 import SensorTrendCharts from './components/SensorTrendCharts'
 import McEditModal from './components/McEditModal'
+import McProtocolCardView from './components/McProtocolCardView'
 import useMcEditEditor from './hooks/useMcEditEditor'
 
 // 배포: same-origin으로 호출하고, 경로는 각 호출부의 /api/...를 그대로 사용한다.
@@ -263,7 +264,7 @@ function parseTemperatureTrendPoint(value) {
 
 function App() {
   const [serverConnected, setServerConnected] = useState(false)
-  const [activeView, setActiveView] = useState('plc') // 'plc' | 'mc' | 'dashboard'
+  const [activeView, setActiveView] = useState('plc') // 'plc' | 'mc' | 'mcCard' | 'dashboard'
   const [ioVariableList, setIoVariableList] = useState([]) // [ [name, lengthBit], ... ]
   const [showBitsCol, setShowBitsCol] = useState(false)
   const [showHexCol, setShowHexCol] = useState(false)
@@ -799,6 +800,14 @@ function App() {
           </button>
           <button
             type="button"
+            className={`side-tab ${activeView === 'mcCard' ? 'active' : ''}`}
+            onClick={() => setActiveView('mcCard')}
+          >
+            <span className="side-tab-label">MC Protocol (card)</span>
+            <span className="side-tab-desc">카드 UI</span>
+          </button>
+          <button
+            type="button"
             className={`side-tab ${activeView === 'dashboard' ? 'active' : ''}`}
             onClick={() => setActiveView('dashboard')}
           >
@@ -995,6 +1004,33 @@ function App() {
                 )}
               </div>
             </section>
+          )}
+
+          {activeView === 'mcCard' && (
+            <McProtocolCardView
+              mcDisplayList={mcDisplayList}
+              mcValues={mcValues}
+              mcConnected={mcConnected}
+              mcError={mcError}
+              displayVariableListLength={displayVariableList.length}
+              getDisplayValue={getDisplayValue}
+              decodeForDisplayWithReset={decodeForDisplayWithReset}
+              formatParsedValueAsBits={formatParsedValueAsBits}
+              formatParsedValueAsHex={formatParsedValueAsHex}
+              showBitsCol={showBitsCol}
+              setShowBitsCol={setShowBitsCol}
+              showHexCol={showHexCol}
+              setShowHexCol={setShowHexCol}
+              showValueCol={showValueCol}
+              setShowValueCol={setShowValueCol}
+              showMetaBit={showMetaBit}
+              setShowMetaBit={setShowMetaBit}
+              showMetaType={showMetaType}
+              setShowMetaType={setShowMetaType}
+              showMetaDesc={showMetaDesc}
+              setShowMetaDesc={setShowMetaDesc}
+              onOpenMcEdit={mcEdit.openPopup}
+            />
           )}
 
           {activeView === 'dashboard' && (

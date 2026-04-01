@@ -1,0 +1,438 @@
+/* MC Protocol 카드 탭 — parsed-view / mc-view 와 동일 토큰 사용, 카드 전용 보조 스타일만 정의 */
+
+.mc-protocol-card-section .mc-protocol-card-header {
+  padding-bottom: 0.65rem;
+}
+
+.mc-protocol-card-title-row {
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+
+.mc-protocol-card-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.mc-protocol-card-header-actions .btn {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.75rem;
+  white-space: nowrap;
+}
+
+.mc-protocol-card-title-block h2 {
+  margin: 0 0 0.2rem 0;
+}
+
+.mc-protocol-card-hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.45;
+  max-width: 36rem;
+}
+
+.mc-protocol-card-pill {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.mc-protocol-card-pill--on {
+  background: rgba(81, 207, 102, 0.12);
+  border-color: rgba(81, 207, 102, 0.35);
+  color: var(--success);
+}
+
+.mc-protocol-card-pill--off {
+  background: rgba(255, 107, 107, 0.08);
+  border-color: rgba(255, 107, 107, 0.28);
+  color: var(--danger);
+}
+
+.mc-protocol-card-toolbar-wrap {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.mc-protocol-card-toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* 오른쪽 끝: 숨김 목록 트리거만 너비 차지 */
+.mc-protocol-card-hidden-pop {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-left: auto;
+}
+
+.mc-protocol-card-hidden-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  list-style: none;
+  margin: 0;
+  padding: 0.22rem 0.45rem 0.22rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  user-select: none;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.mc-protocol-card-hidden-trigger:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text-primary);
+}
+
+.mc-protocol-card-hidden-pop[open] > .mc-protocol-card-hidden-trigger {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.mc-protocol-card-hidden-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.mc-protocol-card-hidden-trigger-label {
+  letter-spacing: -0.01em;
+}
+
+.mc-protocol-card-hidden-badge {
+  font-size: 0.62rem;
+  font-weight: 600;
+  min-width: 1rem;
+  padding: 0.05rem 0.28rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.mc-protocol-card-hidden-chevron {
+  font-size: 0.55rem;
+  opacity: 0.75;
+  transition: transform 0.15s ease;
+}
+
+.mc-protocol-card-hidden-pop[open] .mc-protocol-card-hidden-chevron {
+  transform: rotate(-180deg);
+}
+
+.mc-protocol-card-hidden-pop-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 8;
+  min-width: min(280px, calc(100vw - 2rem));
+  max-width: min(360px, 94vw);
+  padding: 0.45rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.mc-protocol-card-bulk-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.mc-protocol-card-bulk-btn {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 0.3rem 0.4rem;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.mc-protocol-card-bulk-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  background: rgba(77, 171, 247, 0.06);
+}
+
+.mc-protocol-card-bulk-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.mc-protocol-card-hidden-empty {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.mc-protocol-card-hidden-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  max-height: 10rem;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.mc-protocol-card-hidden-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  max-width: 100%;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem 0.1rem 0.28rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.mc-protocol-card-hidden-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(77, 171, 247, 0.06);
+}
+
+.mc-protocol-card-hidden-chip-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.mc-protocol-card-hidden-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.mc-protocol-card-error {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+}
+
+.mc-protocol-card-body {
+  padding-top: 0.85rem;
+}
+
+.mc-protocol-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: 0.65rem;
+  align-items: stretch;
+}
+
+.mc-protocol-card-item {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-tertiary, var(--bg-primary));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mc-protocol-card-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+}
+
+.mc-protocol-card-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+  min-width: 0;
+}
+
+.mc-protocol-card-item-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Monaco, Consolas, monospace;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.mc-protocol-card-item:hover .mc-protocol-card-item-name {
+  color: var(--accent-hover);
+}
+
+.mc-protocol-card-eye-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+
+.mc-protocol-card-eye-btn:hover {
+  opacity: 1;
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.mc-protocol-card-eye-btn:focus-visible {
+  opacity: 1;
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.mc-protocol-card-eye-btn-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .mc-protocol-card-hidden-trigger:hover,
+  .mc-protocol-card-hidden-pop[open] > .mc-protocol-card-hidden-trigger {
+    border-color: var(--accent);
+  }
+}
+
+.mc-protocol-card-aux {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.62rem;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Monaco, Consolas, monospace;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.mc-protocol-card-aux-line {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr);
+  gap: 0.35rem;
+  align-items: start;
+}
+
+.mc-protocol-card-aux-label {
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.mc-protocol-card-aux-val {
+  word-break: break-all;
+  color: var(--text-primary);
+  opacity: 0.92;
+}
+
+.mc-protocol-card-value-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  min-height: 2.35rem;
+  margin-top: 0.15rem;
+  margin-bottom: 0.25rem;
+  padding: 0.2rem 0;
+}
+
+.mc-protocol-card-value-row--string {
+  justify-content: flex-start;
+}
+
+.mc-protocol-card-value-row .boolean-dot {
+  flex-shrink: 0;
+}
+
+.mc-protocol-card-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  word-break: break-word;
+  color: #f4f8fc;
+  letter-spacing: -0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.mc-protocol-card-value--string {
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: left;
+  align-self: stretch;
+  line-height: 1.35;
+}
+
+.mc-protocol-card-meta {
+  display: grid;
+  gap: 0.35rem 0.5rem;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.mc-protocol-card-meta-bit {
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-protocol-card-meta-type {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.mc-protocol-card-meta-desc {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .mc-protocol-card-item:hover {
+    border-color: var(--accent);
+  }
+}
