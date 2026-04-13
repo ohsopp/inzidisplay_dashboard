@@ -69,7 +69,7 @@ sudo systemctl reload nginx
 ```
 
 - **Gunicorn 포트**: 기본 8000. 변경했다면 Nginx의 `proxy_pass http://127.0.0.1:8000` 도 함께 수정.
-- **HTTPS / Vercel 우회**: 공인 인증서 없이 쓰려면 `vercel.json`의 rewrite를 `http://도메인:6006/api/...`처럼 **HTTP 6006**으로 두면 됩니다(Vercel→집 구간은 평문). 나중에 Let’s Encrypt로 443만 정리해도 됨.
+- **HTTPS**: Let's Encrypt 사용 시 `sudo certbot --nginx -d example.com` 실행 후, certbot이 자동으로 443 블록을 추가/수정합니다. 수동이면 주석 해제 후 인증서 경로만 맞추면 됩니다.
 
 ---
 
