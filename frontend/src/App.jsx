@@ -6,12 +6,41 @@ import McEditModal from './components/McEditModal'
 import McProtocolCardView from './components/McProtocolCardView'
 import useMcEditEditor from './hooks/useMcEditEditor'
 
-// 프로덕션: VITE_API_URL 비우면 same-origin(/api/...) → vercel.json rewrite. Vercel이 집 서버에 못 붙으면(502 ROUTER_EXTERNAL_TARGET_…)
-// Vercel 환경변수에 VITE_API_URL=https://백엔드공개주소 만 넣으면 브라우저가 직접 호출해 프록시를 우회한다. HTTPS 페이지라 백엔드도 https 필요.
-const PRODUCTION_API_URL = String(import.meta.env.VITE_API_URL || '')
-  .trim()
-  .replace(/\/$/, '')
-const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL
+// 프로덕션 API 베이스: VITE_API_URL > URL 쿼리 plc_api|api_base > localStorage plc_api_base > 아래 기본값(브라우저 직접 연결, Vercel rewrite 우회).
+// Vercel이 집으로 프록시 못 할 때(502 ROUTER_EXTERNAL_TARGET_…) 기본값으로도 동작하게 함. 다른 배포면 VITE_API_URL 로 덮어쓰기.
+const STORAGE_KEY_API_BASE = 'plc_api_base'
+const DEFAULT_PROD_API_BASE = 'https://uitsolutions.iptime.org:444'
+
+function getApiBaseUrl() {
+  if (import.meta.env.DEV) {
+    const h = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+    return `http://${h}:6005`
+  }
+  const fromEnv = String(import.meta.env.VITE_API_URL || '')
+    .trim()
+    .replace(/\/$/, '')
+  if (fromEnv) return fromEnv
+
+  if (typeof window !== 'undefined') {
+    try {
+      const q = new URLSearchParams(window.location.search)
+      for (const key of ['plc_api', 'api_base']) {
+        const v = (q.get(key) || '').trim().replace(/\/$/, '')
+        if (v.startsWith('https://')) {
+          window.localStorage.setItem(STORAGE_KEY_API_BASE, v)
+          return v
+        }
+      }
+      const saved = (window.localStorage.getItem(STORAGE_KEY_API_BASE) || '').trim().replace(/\/$/, '')
+      if (saved.startsWith('https://')) return saved
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return DEFAULT_PROD_API_BASE
+}
+
 const SENSOR_TREND_MAX_POINTS = 240
 
 function getApiToken() {
@@ -33,7 +62,7 @@ function getApiToken() {
 }
 
 function buildApiUrl(path) {
-  return `${API_URL}${path}`
+  return `${getApiBaseUrl()}${path}`
 }
 
 function buildEventsUrl() {
@@ -328,7 +357,7 @@ function App() {
 
   /** MC 프로토콜 뷰: 원래 전체 목록 표시. MC 폴링되는 4개만 값 있고 나머지는 - (나중에 실데이터 넣을 때 사용) */
   const mcDisplayList = useMemo(() => displayVariableList, [displayVariableList])
-  const mcEdit = useMcEditEditor({ apiUrl: API_URL, activeView })
+  const mcEdit = useMcEditEditor({ apiUrl: getApiBaseUrl(), activeView })
 
   // io_variables.json 로드 (변수명·length/dataType/scale/description, 순서 유지)
   useEffect(() => {
@@ -824,7 +853,7 @@ function App() {
               mcConnected={mcConnected}
               mcValues={mcValues}
               ioVariableList={ioVariableList}
-              apiUrl={API_URL}
+              apiUrl={getApiBaseUrl()}
             />
           )}
 
