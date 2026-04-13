@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "http://uitsolutions.iptime.org:6005/api/:path*"
+      "destination": "http://inzi.duckdns.org:6005/api/:path*"
     }
   ],
   "headers": [

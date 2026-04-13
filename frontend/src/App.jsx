@@ -6,9 +6,8 @@ import McEditModal from './components/McEditModal'
 import McProtocolCardView from './components/McProtocolCardView'
 import useMcEditEditor from './hooks/useMcEditEditor'
 
-// 배포 기본: same-origin + vercel.json에서 백엔드로 rewrite.
-// Vercel Deployment Protection 등으로 /api/* 가 401이면, Vercel 환경변수에
-// 직접 붙이려면 https://uitsolutions.iptime.org:444 처럼 HTTPS만 권장(http://:6005 는 https 페이지에서 혼합 콘텐츠 차단 가능).
+// 배포 기본: same-origin + vercel.json 이 /api/* 를 원격 Gunicorn(예: inzi.duckdns.org:6005)으로 프록시.
+// Vercel 환경변수 VITE_API_BASE_URL 로 직접 백엔드 URL을 쓰는 경우에만 HTTPS(예: :6006) 필요.
 const PRODUCTION_API_URL = String(import.meta.env.VITE_API_BASE_URL || '')
   .trim()
   .replace(/\/$/, '')
