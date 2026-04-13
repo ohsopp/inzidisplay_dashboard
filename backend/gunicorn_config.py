@@ -1,18 +1,23 @@
 """
 Gunicorn 설정 — 실제 서버 배포용.
-- bind: 127.0.0.1:8000 (Nginx가 이 주소로 프록시. 8000 사용 중이면 8001 등으로 변경)
+- bind: SIMPAC/react_dashboard와 동일 패턴 — nginx용 루프백 + 포트포워딩 직결.
+  기본 ["127.0.0.1:8001", "0.0.0.0:6005"] — 8000·5005·5006은 SIMPAC 쪽과 겹치지 않게 분리.
+  단일 주소만 쓰려면 GUNICORN_BIND=127.0.0.1:8001 처럼 환경변수로 덮어쓰기.
 - workers: 1 (앱이 프로세스 전역 상태/SSE 큐를 사용하므로 멀티워커 비권장)
-- timeout: 120 (SSE 장기 연결 허용)
+- timeout: 300 (react_dashboard gunicorn/nginx와 동일 계열, SSE·장기 요청)
 - chdir: backend 디렉터리
 - wsgi_app: app:app
 """
-import multiprocessing
 import os
 
 # 프로젝트 백엔드 루트 (이 설정 파일이 있는 디렉터리)
 _chdir = os.path.dirname(os.path.abspath(__file__))
 
-bind = os.environ.get("GUNICORN_BIND", "127.0.0.1:8000")
+_bind_override = os.environ.get("GUNICORN_BIND", "").strip()
+if _bind_override:
+    bind = _bind_override
+else:
+    bind = ["127.0.0.1:8001", "0.0.0.0:6005"]
 chdir = _chdir
 wsgi_app = "app:app"
 
@@ -23,7 +28,7 @@ workers = int(os.environ.get("GUNICORN_WORKERS", 1))
 # 기본 64로 상향해 스레드 고갈(health/API 타임아웃) 가능성을 줄인다.
 threads = int(os.environ.get("GUNICORN_THREADS", 64))
 worker_class = "gthread"
-timeout = int(os.environ.get("GUNICORN_TIMEOUT", 120))
+timeout = int(os.environ.get("GUNICORN_TIMEOUT", 300))
 keepalive = 5
 
 # 로그: 프로젝트 내 logs 또는 /var/log
@@ -35,4 +40,4 @@ loglevel = os.environ.get("GUNICORN_LOG_LEVEL", "info")
 capture_output = True
 
 # 프로세스 이름
-proc_name = "plc-backend"
+proc_name = "inzidisplay-backend"

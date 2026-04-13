@@ -22,9 +22,9 @@ python3 -m venv venv
 ## 2. Gunicorn 설정
 
 - **설정 파일**: `backend/gunicorn_config.py`
-- **bind**: `127.0.0.1:8000` (Nginx가 이 주소로 프록시). 8000 사용 중이면 `GUNICORN_BIND=127.0.0.1:8001` 등으로 변경.
-- **workers/threads**: workers=2, threads=2 (I/O·SSE 고려). `GUNICORN_WORKERS`, `GUNICORN_THREADS` 로 조정 가능.
-- **timeout**: 120초 (SSE 장기 연결). `GUNICORN_TIMEOUT` 로 조정 가능.
+- **bind**: 기본 `127.0.0.1:8001` + `0.0.0.0:6005` (SIMPAC/react_dashboard 의 8000+5005 패턴과 동형; 공유기 포트포워딩은 6005). 단일 주소만 쓰려면 `GUNICORN_BIND=127.0.0.1:8001`.
+- **workers/threads**: workers=1 기본, threads 등은 `GUNICORN_WORKERS`, `GUNICORN_THREADS` 로 조정.
+- **timeout**: 기본 300초 (SIMPAC 백엔드와 동일 계열). `GUNICORN_TIMEOUT` 로 조정.
 - **로그**: 기본 `backend/logs/gunicorn_access.log`, `gunicorn_error.log`. `GUNICORN_LOG_DIR` 또는 `GUNICORN_ACCESS_LOG`/`GUNICORN_ERROR_LOG` 로 변경 가능.
 
 로컬 테스트:
@@ -32,7 +32,7 @@ python3 -m venv venv
 ```bash
 cd backend
 ./venv/bin/gunicorn -c gunicorn_config.py app:app
-# 다른 터미널: curl http://127.0.0.1:8000/api/health  → 200 {"status":"ok"}
+# 다른 터미널: curl http://127.0.0.1:8001/api/health  또는 curl http://127.0.0.1:6005/api/health
 ```
 
 ---
@@ -68,7 +68,8 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-- **Gunicorn 포트**: 기본 8000. 변경했다면 Nginx의 `proxy_pass http://127.0.0.1:8000` 도 함께 수정.
+- **Gunicorn 포트**: 기본 8001. 변경했다면 Nginx `upstream`/ `proxy_pass`와 systemd `GUNICORN_BIND`를 함께 수정.
+- **동일 서버 전용 설치**: `sudo bash deploy/install-inzidisplay-backend.sh` — `inzidisplay-backend` 서비스와 `sites-enabled/inzidisplay-backend`만 등록하며, 기존 `plc-backend` 설정은 덮어쓰지 않음.
 - **HTTPS**: Let's Encrypt 사용 시 `sudo certbot --nginx -d example.com` 실행 후, certbot이 자동으로 443 블록을 추가/수정합니다. 수동이면 주석 해제 후 인증서 경로만 맞추면 됩니다.
 
 ---
@@ -78,9 +79,9 @@ sudo systemctl reload nginx
 ### 경로·권한
 - 프로젝트 루트(예: `/opt/plc_test`), `WorkingDirectory`(예: `/opt/plc_test/backend`), `backend/logs`, `backend/poll_logs` 에 대해 systemd 서비스의 User/Group이 읽기·쓰기 가능한지 확인.
 
-### 포트
-- Gunicorn bind 포트(기본 8000)가 다른 서비스와 충돌하지 않는지 확인.
-- 방화벽(UFW 등)은 80/443만 열고, 8000은 외부에 노출하지 않기.
+### 포트 (inzidisplay-backend)
+- **8001**: 루프백만(Nginx→Gunicorn). **6005**: Vercel `rewrite` 직결용(SIMPAC의 5005와 같은 역할). **444**: Nginx HTTPS(선택 경로).
+- SIMPAC `react_dashboard`의 **8000·5005·5006** 과 겹치지 않게 유지할 것.
 
 ### 도메인·DNS
 - Nginx `server_name`에 쓴 도메인이 해당 서버 공인 IP를 가리키는지 확인.

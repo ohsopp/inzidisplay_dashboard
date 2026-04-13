@@ -1,0 +1,39 @@
+# Inzi Display 대시보드 백엔드 — Gunicorn (127.0.0.1:8001 + 0.0.0.0:6005, gunicorn_config.py)
+# SIMPAC/react_dashboard 의 backend-gunicorn.service 와 같은 계열(Type=notify 등).
+# 설치: sudo cp deploy/inzidisplay-backend.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable inzidisplay-backend && sudo systemctl start inzidisplay-backend
+#
+# 8000·5005는 SIMPAC react_dashboard 전용 — 이 서비스는 건드리지 않음.
+
+[Unit]
+Description=Inzi Display Dashboard Backend (Gunicorn)
+After=network.target
+
+[Service]
+Type=notify
+User=uit
+Group=uit
+WorkingDirectory=/home/uit/Inzi/inzidisplay_dashboard/backend
+
+Environment=PATH=/home/uit/Inzi/inzidisplay_dashboard/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
+# bind 는 gunicorn_config.py 기본값(8001+6005). 단일 바인드만 쓸 때만 GUNICORN_BIND 설정.
+
+Environment=PGHOST=127.0.0.1
+Environment=PGPORT=5432
+Environment=PGDATABASE=plc_test
+Environment=PGUSER=plc_app
+Environment=PGPASSWORD=CHANGE_ME
+Environment=INFLUX_URL=http://127.0.0.1:8086
+Environment=INFLUX_TOKEN=CHANGE_ME
+Environment=INFLUX_ORG=plc
+Environment=INFLUX_BUCKET=plc_data
+
+ExecStart=/home/uit/Inzi/inzidisplay_dashboard/backend/venv/bin/gunicorn -c gunicorn_config.py app:app
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

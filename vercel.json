@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://uitsolutions.iptime.org:444/api/:path*"
+      "destination": "http://uitsolutions.iptime.org:6005/api/:path*"
     }
   ],
   "headers": [
