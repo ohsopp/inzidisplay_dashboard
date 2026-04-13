@@ -159,18 +159,10 @@ def broadcast(event: str, data: dict):
                 pass
 
 
-# SIMPAC react_dashboard/backend/routes/streams.py SSE_MAX_LIFETIME 과 동일.
-# 무한 SSE 는 Vercel → iptime:6005 rewrite 업스트림이 장시간 연결로 타임아웃(502) 나기 쉬움 → 주기 종료 후 EventSource 가 재연결.
-SSE_MAX_LIFETIME = 120
-
-
 def sse_stream(client_queue):
-    """SSE 스트림 생성 - 각 클라이언트 전용 큐 사용 (SIMPAC streams.py 패턴: 최대 수명 후 종료)"""
-    start_time = time.time()
+    """SSE 스트림 생성 - 각 클라이언트 전용 큐 사용"""
     try:
         while True:
-            if time.time() - start_time > SSE_MAX_LIFETIME:
-                return
             try:
                 # Disconnect 감지를 빠르게 하기 위해 heartbeat 대기시간을 짧게 둔다.
                 msg = client_queue.get(timeout=5)

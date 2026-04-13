@@ -6,14 +6,13 @@ import McEditModal from './components/McEditModal'
 import McProtocolCardView from './components/McProtocolCardView'
 import useMcEditEditor from './hooks/useMcEditEditor'
 
-// SIMPAC react_dashboard/src/config.js 와 동일: API_BASE === ''
-// - 배포(Vercel): same-origin /api/* → vercel.json rewrite → iptime:6005 (Gunicorn 직결, SIMPAC 5005 와 동형)
-// - 로컬: vite proxy /api → 127.0.0.1:6005
-// VITE_API_BASE_URL 이 있으면 직접 백엔드(HTTPS 등) — 혼합 콘텐츠 주의
+// 배포: same-origin + vercel.json 이 /api/* 를 원격 Gunicorn(iptime:6005)으로 프록시.
+// VITE_API_BASE_URL 로 직접 백엔드에 붙이면 HTTPS 권장(혼합 콘텐츠 방지).
 const PRODUCTION_API_URL = String(import.meta.env.VITE_API_BASE_URL || '')
   .trim()
   .replace(/\/$/, '')
-const API_URL = import.meta.env.DEV ? '' : PRODUCTION_API_URL
+// 개발: 로컬 백엔드(6005). 배포: VITE_API_BASE_URL 또는 same-origin
+const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:6005` : PRODUCTION_API_URL
 const SENSOR_TREND_MAX_POINTS = 240
 
 function getApiToken() {

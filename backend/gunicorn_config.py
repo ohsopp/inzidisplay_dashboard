@@ -24,9 +24,8 @@ wsgi_app = "app:app"
 # app.py는 프로세스 전역 메모리(mc_thread/client_queues)를 사용하므로 기본은 1워커 고정.
 # 필요 시 Redis/pubsub 등 외부 상태 저장소로 전환 후 멀티워커 확장 권장.
 workers = int(os.environ.get("GUNICORN_WORKERS", 1))
-# SSE(/api/events) + 동시 API — SIMPAC gunicorn threads=200 과 동일 계열.
-# app.py SSE_MAX_LIFETIME(120s) 로 주기 재연결해 스레드 점유가 순환됨.
-threads = int(os.environ.get("GUNICORN_THREADS", 200))
+# SSE 연결(/api/events)은 연결당 스레드 1개를 장시간 점유하므로 여유 스레드가 필수.
+threads = int(os.environ.get("GUNICORN_THREADS", 64))
 worker_class = "gthread"
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", 300))
 keepalive = 5
