@@ -90,7 +90,7 @@ sudo systemctl reload nginx
 1. [duckdns.org](https://www.duckdns.org/) 에서 서브도메인(예: `inzi`)을 만들고 토큰을 복사합니다. FQDN은 `inzi.duckdns.org` 형태입니다.
 2. **SIMPAC**은 공유기에서 **5005·5006·443** 등을 쓰고, **Inzi**는 **6005·6006·444** 로 두는 구성이 일반적입니다(같은 내부 IP·같은 PC에서 외부 포트가 겹치면 안 됨). Inzi Nginx HTTPS는 **`listen 6006`** 이며, 공유기 규칙 **inzi-nginx: 외부 6006 → 내부 6006** 과 맞춥니다. iptime용 **444** 규칙(inzi-gunicorn)과 함께 씁니다.
 3. 공인 IP가 바뀌는 환경이면 `deploy/duckdns-update-inzi.example.sh` 를 서버에 복사해 토큰을 넣고, cron으로 5분마다 실행해 DuckDNS A 레코드를 갱신합니다.
-4. Let’s Encrypt: `sudo certbot certonly --nginx -d uitsolutions.iptime.org -d inzi.duckdns.org` (도메인 이름은 실제 값으로). 완료 후 `nginx-inzidisplay-backend.conf` 의 `ssl_certificate` 경로를 인증서 경로로 바꿉니다.
+4. Let’s Encrypt (SIMPAC과 동일하게 신뢰 인증서): 공유기에 **외부 80 → 이 서버** 포워딩을 추가한 뒤 `sudo bash deploy/server-apply-inzidisplay-nginx.sh` 로 Nginx(80 ACME 포함)를 적용하고, `export CERTBOT_EMAIL='...'; sudo bash deploy/issue-inzi-letsencrypt.sh` 실행. 인증서는 `/etc/nginx/snippets/inzi-display-ssl.conf` 에 반영됩니다.
 5. 브라우저/API URL 예: `https://inzi.duckdns.org:6006/api/...` (DuckDNS가 443이 아니면 포트 번호 필요).
 
 ### SSL
