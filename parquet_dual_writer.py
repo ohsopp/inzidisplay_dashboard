@@ -2,7 +2,8 @@
 Dual-write helper: mirror Influx points to Parquet with buffering.
 
 Path layout:
-  {INFLUX_PARQUET_DIR}/{bucket}/{measurement}/{YYYYMMDD}.parquet
+  default: {INFLUX_PARQUET_DIR}/{bucket}/{measurement}/{YYYYMMDD}.parquet
+  with interval_key: {INFLUX_PARQUET_DIR}/{bucket}/{interval_key}/{measurement}/{YYYYMMDD}.parquet
 
 Schema:
   t_utc, t_kst, bucket, measurement, tags_json, fields_json, source
@@ -48,9 +49,9 @@ _PARQUET_SCHEMA = pa.schema(
     ]
 )
 
-# key: (bucket, measurement, yyyymmdd) -> rows
-_buffers: dict[tuple[str, str, str], list[dict[str, str]]] = {}
-_buffer_first_mono: dict[tuple[str, str, str], float] = {}
+# key: (bucket, interval_key, measurement, yyyymmdd) -> rows
+_buffers: dict[tuple[str, str, str, str], list[dict[str, str]]] = {}
+_buffer_first_mono: dict[tuple[str, str, str, str], float] = {}
 _write_error_logged = False
 
 
@@ -76,14 +77,16 @@ def _row_for_point(
     fields: dict[str, Any],
     timestamp_ns: int | None,
     source: str,
-) -> tuple[tuple[str, str, str], dict[str, str]]:
+    interval_key: str | None = None,
+) -> tuple[tuple[str, str, str, str], dict[str, str]]:
     if timestamp_ns is None:
         timestamp_ns = time.time_ns()
     dt_utc = datetime.fromtimestamp(timestamp_ns / 1_000_000_000, tz=timezone.utc)
     date_str = dt_utc.strftime("%Y%m%d")
     t_utc = dt_utc.isoformat()
     t_kst = dt_utc.astimezone(KST).isoformat()
-    key = (_normalize_name(bucket), _normalize_name(measurement), date_str)
+    interval_norm = _normalize_name(interval_key) if interval_key else "_default"
+    key = (_normalize_name(bucket), interval_norm, _normalize_name(measurement), date_str)
     row = {
         "t_utc": t_utc,
         "t_kst": t_kst,
@@ -134,7 +137,7 @@ def _merge_write(file_path: str, rows: list[dict[str, str]]) -> None:
     os.replace(tmp, file_path)
 
 
-def _flush_key_locked(key: tuple[str, str, str]) -> None:
+def _flush_key_locked(key: tuple[str, str, str, str]) -> None:
     global _write_error_logged
     rows = _buffers.get(key)
     if not rows:
@@ -143,8 +146,11 @@ def _flush_key_locked(key: tuple[str, str, str]) -> None:
     rows.clear()
     _buffer_first_mono.pop(key, None)
     base = _base_dir()
-    bucket, measurement, date_str = key
-    dir_path = os.path.join(base, bucket, measurement)
+    bucket, interval_key, measurement, date_str = key
+    if interval_key == "_default":
+        dir_path = os.path.join(base, bucket, measurement)
+    else:
+        dir_path = os.path.join(base, bucket, interval_key, measurement)
     try:
         os.makedirs(dir_path, exist_ok=True)
     except OSError:
@@ -178,6 +184,7 @@ def append_point_to_parquet(
     fields: dict[str, Any] | None,
     timestamp_ns: int | None = None,
     source: str = "",
+    interval_key: str | None = None,
 ) -> None:
     if not is_parquet_write_enabled():
         return
@@ -188,6 +195,7 @@ def append_point_to_parquet(
         fields=fields or {},
         timestamp_ns=timestamp_ns,
         source=source,
+        interval_key=interval_key,
     )
     now = time.monotonic()
     with _LOCK:

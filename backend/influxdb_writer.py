@@ -97,13 +97,19 @@ def write_plc_point(variable: str, value, device_type: str = "", measurement: st
         return False
 
 
-def write_plc_batch(records: list, timestamp: float | None = None, measurement: str = "plc"):
+def write_plc_batch(
+    records: list,
+    timestamp: float | None = None,
+    measurement: str = "plc",
+    interval_key: str | None = None,
+):
     """
     records: [(variable, value, device_type?), ...]
     device_type 생략 시 "" 사용.
     timestamp: 폴링 완료 시점(초 단위 float, time.time()). None이면 기록 시점 사용.
                설정 시 UTC datetime으로 변환해 각 Point의 _time에 ms 단위까지 저장.
     measurement: 저장 measurement 이름 (예: plc, M, Y, D)
+    interval_key: parquet 분리 저장용 폴링 키(예: 50ms, 1s, 1min, 1h)
     """
     api = _get_client()
     if api is None:
@@ -145,10 +151,12 @@ def write_plc_batch(records: list, timestamp: float | None = None, measurement: 
             tags={
                 "device": device_for_tag,
                 "record_count": len(records),
+                "interval_key": interval_key or "",
             },
             fields=parquet_fields,
             timestamp_ns=int(timestamp * 1_000_000_000) if timestamp is not None else None,
             source="plc_writer_batch_compact",
+            interval_key=interval_key,
         )
         return True
     except Exception as e:

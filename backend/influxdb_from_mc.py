@@ -37,14 +37,24 @@ def write_parsed_to_influx(
         records = grouped_records[device]
         if not records:
             continue
-        ok = write_plc_batch(records, timestamp=timestamp, measurement=device)
+        ok = write_plc_batch(
+            records,
+            timestamp=timestamp,
+            measurement=device,
+            interval_key=interval_key,
+        )
         wrote_any = ok or wrote_any
         if not _first_write_logged and not ok:
             print(f"[InfluxDB] {device} 기록 실패 (연결/버킷 확인)", flush=True)
 
     # 매핑되지 않은 변수는 호환성을 위해 plc measurement에 저장.
     if unknown_records:
-        wrote_any = write_plc_batch(unknown_records, timestamp=timestamp, measurement="plc") or wrote_any
+        wrote_any = write_plc_batch(
+            unknown_records,
+            timestamp=timestamp,
+            measurement="plc",
+            interval_key=interval_key,
+        ) or wrote_any
 
     # 첫 수신 시 한 번만 상세 로그 (원인 파악용)
     if not _first_write_logged:
