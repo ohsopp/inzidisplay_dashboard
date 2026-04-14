@@ -214,19 +214,23 @@ def health():
 
 def _mc_on_parsed(parsed, interval_key=None):
     broadcast("mc_data", {"parsed": parsed})
+    # interval_key가 없는 호출은 부트스트랩 1회 로드로 간주.
+    # 저장은 주기 스레드(50ms/1s/1min/1h)에서만 수행해
+    # "폴링레이트 = 저장주기"를 보장한다.
+    if not interval_key:
+        return
     ts = time.time()
     def _write():
         try:
             from influxdb_from_mc import write_parsed_to_influx
-            write_parsed_to_influx(parsed, timestamp=ts)
+            write_parsed_to_influx(parsed, timestamp=ts, interval_key=interval_key)
         except Exception as e:
             print("[InfluxDB] 기록 오류:", e, flush=True)
-        if interval_key:
-            try:
-                from poll_parquet_logger import append_parsed_to_parquet
-                append_parsed_to_parquet(parsed, interval_key, ts)
-            except Exception as e:
-                print("[PollParquet] 기록 오류:", e, flush=True)
+        try:
+            from poll_parquet_logger import append_parsed_to_parquet
+            append_parsed_to_parquet(parsed, interval_key, ts)
+        except Exception as e:
+            print("[PollParquet] 기록 오류:", e, flush=True)
     _influx_write_executor.submit(_write)
 
 
@@ -272,6 +276,15 @@ def mc_connect():
             mc_state = {"host": host, "port": port}
             mc_influx_stop_event = None
             print("[MC] 연결됨 %s:%s → 폴링 시작" % (host, port), flush=True)
+            try:
+                from influxdb_config import INFLUX_BUCKET, INFLUX_URL
+                print(
+                    "[InfluxDB] PLC 수신값은 버킷 '%s'에 기록됩니다 (%s)"
+                    % (INFLUX_BUCKET, INFLUX_URL),
+                    flush=True,
+                )
+            except Exception:
+                pass
             broadcast("mc_connected", mc_state)
             return {"ok": True}
         except Exception as e:
@@ -431,6 +444,22 @@ def influxdb_test_write():
         return {"ok": False, "message": str(e)}
 
 
+@app.route("/api/parquet/status", methods=["GET", "POST", "OPTIONS"])
+def parquet_status():
+    if request.method == "OPTIONS":
+        return "", 204
+    try:
+        from parquet_control import is_parquet_write_enabled, set_parquet_write_enabled
+        if request.method == "GET":
+            return {"ok": True, "enabled": is_parquet_write_enabled()}
+        data = request.get_json(silent=True) or {}
+        enabled = bool(data.get("enabled", True))
+        updated = set_parquet_write_enabled(enabled)
+        return {"ok": True, "enabled": updated}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}, 500
+
+
 @app.route("/api/influxdb/export-csv", methods=["GET", "POST", "OPTIONS"])
 def influxdb_export_csv():
     """지정 기간·폴링 그룹(50ms|1s|1min|1h)별 피벗 CSV 반환. 행=변수, 열=타임스탬프."""
@@ -471,8 +500,8 @@ def influxdb_export_csv():
 try:
     from mqtt_subscriber import start as mqtt_start
     mqtt_start(broadcast)
-except Exception:
-    pass
+except Exception as e:
+    print("[MQTT] 구독 시작 실패:", e, flush=True)
 
 
 def _serve_frontend(path=""):
@@ -516,7 +545,7 @@ if __name__ == "__main__":
         else:
             print("[InfluxDB] 연결 실패 (%s)" % msg, flush=True)
             print("  같은 터미널에서 확인: curl -s -o /dev/null -w '%%{http_code}' %s/health  → 200 나와야 함" % INFLUX_URL.rstrip("/"), flush=True)
-            print("  백엔드를 Docker 안에서 실행 중이면: INFLUX_URL=http://host.docker.internal:8086 또는 호스트 IP 사용", flush=True)
+            print("  백엔드를 Docker 안에서 실행 중이면: INFLUX_URL=http://host.docker.internal:8090 (호스트에 노출된 포트) 또는 호스트 IP 사용", flush=True)
     except Exception:
         pass
     app.run(host="0.0.0.0", port=6005, debug=True, use_reloader=False, threaded=True)

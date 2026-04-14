@@ -289,6 +289,8 @@ function App() {
   const [csvExportGroup, setCsvExportGroup] = useState('50ms')
   const [csvExportError, setCsvExportError] = useState('')
   const [csvExportLoading, setCsvExportLoading] = useState(false)
+  const [parquetEnabled, setParquetEnabled] = useState(true)
+  const [parquetToggleLoading, setParquetToggleLoading] = useState(false)
   const eventSourceRef = useRef(null)
   const reconnectTimerRef = useRef(null)
   /** 타발수 등: 리셋(음수) 시 처음 보였던 시작값으로 표시 (예: 10000 시작 → 리셋 시 10000) */
@@ -345,6 +347,25 @@ function App() {
         setIoVariableList(entries)
       })
       .catch(() => setIoVariableList([]))
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadParquetStatus = async () => {
+      try {
+        const res = await apiFetch('/api/parquet/status')
+        const data = await res.json().catch(() => ({}))
+        if (!cancelled && res.ok) {
+          setParquetEnabled(Boolean(data.enabled))
+        }
+      } catch {
+        // no-op
+      }
+    }
+    loadParquetStatus()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -578,6 +599,26 @@ function App() {
     }
   }
 
+  const toggleParquetWrite = async () => {
+    if (parquetToggleLoading) return
+    const next = !parquetEnabled
+    setParquetToggleLoading(true)
+    try {
+      const res = await apiFetch('/api/parquet/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || data.message || `오류 ${res.status}`)
+      setParquetEnabled(Boolean(data.enabled))
+    } catch (e) {
+      alert(e.message || 'Parquet 저장 상태 변경 실패')
+    } finally {
+      setParquetToggleLoading(false)
+    }
+  }
+
   /** 바이트 하나를 8비트 문자열로 (MSB 먼저) */
   const byteToBits8 = (b) => ((b & 0xff).toString(2)).padStart(8, '0')
 
@@ -671,6 +712,14 @@ function App() {
           <h1>MC Protocol(3E) & MQTT(IOLink)</h1>
         </div>
         <div className="header-actions">
+          <button
+            type="button"
+            className={`btn parquet-toggle-btn ${parquetEnabled ? 'is-stop' : 'is-start'}`}
+            onClick={toggleParquetWrite}
+            disabled={parquetToggleLoading}
+          >
+            {parquetToggleLoading ? '처리 중…' : parquetEnabled ? 'Parquet 저장 중지' : 'Parquet 저장 시작'}
+          </button>
           <button type="button" className="btn csv-export-btn" onClick={openCsvExportModal}>
             Data Export
           </button>

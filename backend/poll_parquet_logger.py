@@ -18,6 +18,7 @@ from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from parquet_control import is_parquet_write_enabled
 
 KST = timezone(timedelta(hours=9))
 
@@ -182,6 +183,8 @@ def append_parsed_to_parquet(parsed: dict, interval_key: str, timestamp: float) 
     parsed: { variable_name: value, ... }
     interval_key: "50ms" | "1s" | "1min" | "1h"
     """
+    if not is_parquet_write_enabled():
+        return
     if not parsed or not interval_key:
         return
     base = _get_base_dir()

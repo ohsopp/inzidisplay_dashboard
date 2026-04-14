@@ -1,92 +1,69 @@
 """
 대시보드 MC 폴러에서 받은 parsed 데이터를 InfluxDB에 기록.
-- 알람(M): 값이 1일 때만 기록
-- 경고등/부저(Y): 매 수신 기록
-- 데이터(D) 일반: 매 수신 기록
-- 데이터(D) 1시간 항목: 1시간마다만 기록
+- measurement를 디바이스 타입(M/Y/D)으로 분리
+- 모든 변수·모든 값(숫자/문자 포함) 저장
 """
-import time
-
-from mc_mapping import get_name_to_device, INFLUX_HOURLY_SAVE_NAMES
+from mc_mapping import get_name_to_device
 from influxdb_writer import write_plc_batch
 
-_last_hourly_write = 0.0
-_HOURLY_INTERVAL = 3600.0
 _first_write_logged = False
-_dash_only_logged = False  # "수신 데이터가 모두 '-'" 한 번만 출력
 
 
-def write_parsed_to_influx(parsed: dict, timestamp: float | None = None) -> None:
+def write_parsed_to_influx(
+    parsed: dict, timestamp: float | None = None, interval_key: str | None = None
+) -> None:
     """
     MC 폴러에서 받은 parsed {변수명: 값}을 규칙에 따라 InfluxDB에 기록.
     timestamp: 폴링 완료 시점(초 단위 float, time.time()). None이면 기록 시점 사용.
+    interval_key: 폴링 스레드 키(50ms|1s|1min|1h). 로깅용.
     """
-    global _first_write_logged, _dash_only_logged
+    global _first_write_logged
     if not parsed:
         return
     name_to_device = get_name_to_device()
     wrote_any = False
 
-    # M: 0/1 모두 기록 (CSV에서 0도 표시되도록)
-    m_records = []
+    grouped_records = {"M": [], "Y": [], "D": []}
+    unknown_records = []
     for name, val in parsed.items():
-        if name_to_device.get(name) != "M":
+        device = str(name_to_device.get(name) or "").strip().upper()
+        if device in grouped_records:
+            # 0/False/"0" 포함, 수신된 값을 그대로 저장한다.
+            grouped_records[device].append((name, val, device))
+        else:
+            unknown_records.append((name, val, ""))
+
+    for device in ("M", "Y", "D"):
+        records = grouped_records[device]
+        if not records:
             continue
-        if val == "-" or val is None:
-            continue
-        try:
-            v = int(float(val)) if isinstance(val, str) else int(val)
-            if v in (0, 1):
-                m_records.append((name, v, "M"))
-        except (TypeError, ValueError):
-            pass
-    if m_records:
-        ok = write_plc_batch(m_records, timestamp=timestamp)
+        ok = write_plc_batch(records, timestamp=timestamp, measurement=device)
         wrote_any = ok or wrote_any
         if not _first_write_logged and not ok:
-            print("[InfluxDB] M 기록 실패 (연결/버킷 확인)", flush=True)
+            print(f"[InfluxDB] {device} 기록 실패 (연결/버킷 확인)", flush=True)
 
-    # Y: 모두 (유효한 값만)
-    y_records = [(name, val, "Y") for name, val in parsed.items()
-                 if name_to_device.get(name) == "Y" and val != "-"]
-    if y_records:
-        ok = write_plc_batch(y_records, timestamp=timestamp)
-        wrote_any = ok or wrote_any
-        if not _first_write_logged and not ok:
-            print("[InfluxDB] Y 기록 실패 (연결/버킷 확인)", flush=True)
-
-    # D 일반(비-hourly): 매 수신 기록
-    d_normal = [(name, val, "D") for name, val in parsed.items()
-                if name_to_device.get(name) == "D" and name not in INFLUX_HOURLY_SAVE_NAMES and val != "-"]
-    if d_normal:
-        ok = write_plc_batch(d_normal, timestamp=timestamp)
-        wrote_any = ok or wrote_any
-        if not _first_write_logged and not ok:
-            print("[InfluxDB] D 기록 실패 (연결/버킷 확인)", flush=True)
-
-    # D 1시간 항목: 1시간마다만 기록
-    global _last_hourly_write
-    now = time.time()
-    if now - _last_hourly_write >= _HOURLY_INTERVAL:
-        d_hourly = [(name, val, "D") for name, val in parsed.items()
-                    if name_to_device.get(name) == "D" and name in INFLUX_HOURLY_SAVE_NAMES and val != "-"]
-        if d_hourly:
-            wrote_any = write_plc_batch(d_hourly, timestamp=timestamp) or wrote_any
-            _last_hourly_write = now
+    # 매핑되지 않은 변수는 호환성을 위해 plc measurement에 저장.
+    if unknown_records:
+        wrote_any = write_plc_batch(unknown_records, timestamp=timestamp, measurement="plc") or wrote_any
 
     # 첫 수신 시 한 번만 상세 로그 (원인 파악용)
-    non_dash = sum(1 for v in parsed.values() if v != "-")
-    total_records = len(m_records) + len(y_records) + len(d_normal)
     if not _first_write_logged:
-        print("[InfluxDB] 수신 %d건, 유효값 %d건 → M:%d Y:%d D:%d 기록 시도" % (
-            len(parsed), non_dash, len(m_records), len(y_records), len(d_normal)), flush=True)
+        print(
+            "[InfluxDB] 수신 %d건(%s) → M:%d Y:%d D:%d unknown:%d 기록 시도"
+            % (
+                len(parsed),
+                interval_key or "unknown",
+                len(grouped_records["M"]),
+                len(grouped_records["Y"]),
+                len(grouped_records["D"]),
+                len(unknown_records),
+            ),
+            flush=True,
+        )
         if wrote_any:
             print("[InfluxDB] MC → InfluxDB 기록 완료 (이후 주기적 기록)", flush=True)
             _first_write_logged = True
-        elif non_dash > 0 and total_records == 0:
+        elif len(parsed) > 0 and not any(grouped_records.values()):
             print("[InfluxDB] 원인: name_to_device 매칭 안됨 (수신 이름과 mc_fake_values.json name 불일치?)", flush=True)
             _first_write_logged = True  # 한 번만 로그
-        elif non_dash == 0 and not _dash_only_logged:
-            print("[InfluxDB] 원인: 수신값이 전부 '-' (가짜서버 5002 미동작 또는 연결 실패)", flush=True)
-            _dash_only_logged = True
         _first_write_logged = True  # 상세 로그는 첫 1회만

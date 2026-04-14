@@ -83,6 +83,32 @@
   transform: translateY(-1px);
 }
 
+.parquet-toggle-btn {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
+}
+
+.parquet-toggle-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.parquet-toggle-btn.is-stop {
+  background: rgba(248, 113, 113, 0.16);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #ffb4b4;
+}
+
+.parquet-toggle-btn.is-start {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #8ef0b2;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;

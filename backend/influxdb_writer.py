@@ -1,13 +1,35 @@
 """
 PLC 수집 데이터를 InfluxDB 2.x에 기록.
-measurement: plc, tag: variable=이름, field: value (숫자/문자)
+기본 measurement는 plc이며, 호출부에서 M/Y/D 등으로 지정 가능.
+tag: variable=이름, field: value 또는 value_str
 """
 from datetime import datetime, timezone
 
 from influxdb_config import INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, INFLUX_BUCKET, is_configured
+try:
+    from parquet_dual_writer import append_point_to_parquet
+except ImportError:
+    import os
+    import sys
+    _ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _ROOT_DIR not in sys.path:
+        sys.path.insert(0, _ROOT_DIR)
+    from parquet_dual_writer import append_point_to_parquet
 
 _client = None
 _write_api = None
+
+
+def _field_value_for_influx(value):
+    """
+    measurement plc의 field 'value'는 버킷에서 타입이 한 번 정해지면 바꿀 수 없다.
+    정수/실수/불리언이 섞이면 422 field type conflict가 나므로 숫자는 항상 float로 통일한다.
+    """
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return value
 
 
 def _get_client():
@@ -23,7 +45,11 @@ def _get_client():
         _client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         # 배치 모드는 버퍼가 쌓여서 즉시 안 갈 수 있음 → 동기 쓰기로 매번 즉시 전송
         _write_api = _client.write_api(write_options=SYNCHRONOUS)
-        print("[InfluxDB] 연결됨 %s (동기 쓰기)" % INFLUX_URL, flush=True)
+        print(
+            "[InfluxDB] 연결됨 %s 버킷=%s (동기 쓰기)"
+            % (INFLUX_URL, INFLUX_BUCKET),
+            flush=True,
+        )
         return _write_api
     except Exception as e:
         print("[InfluxDB] 연결 실패:", e, flush=True)
@@ -36,7 +62,7 @@ def _get_client_obj():
     return _client
 
 
-def write_plc_point(variable: str, value, device_type: str = ""):
+def write_plc_point(variable: str, value, device_type: str = "", measurement: str = "plc"):
     """
     단일 변수 한 점 기록.
     value: int, float, str (문자열은 field "value_str" 사용)
@@ -46,25 +72,38 @@ def write_plc_point(variable: str, value, device_type: str = ""):
         return False
     try:
         from influxdb_client import Point
-        p = Point("plc").tag("variable", variable)
+        p = Point(measurement).tag("variable", variable)
         if device_type:
             p = p.tag("device", device_type)
-        if isinstance(value, (int, float)):
-            p = p.field("value", value)
+        if isinstance(value, (int, float, bool)):
+            p = p.field("value", _field_value_for_influx(value))
+            fields = {"value": _field_value_for_influx(value)}
         else:
             p = p.field("value_str", str(value))
+            fields = {"value_str": str(value)}
         api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=p)
+        tags = {"variable": variable}
+        if device_type:
+            tags["device"] = device_type
+        append_point_to_parquet(
+            bucket=INFLUX_BUCKET,
+            measurement=measurement,
+            tags=tags,
+            fields=fields,
+            source="plc_writer_point",
+        )
         return True
     except Exception:
         return False
 
 
-def write_plc_batch(records: list, timestamp: float | None = None):
+def write_plc_batch(records: list, timestamp: float | None = None, measurement: str = "plc"):
     """
     records: [(variable, value, device_type?), ...]
     device_type 생략 시 "" 사용.
     timestamp: 폴링 완료 시점(초 단위 float, time.time()). None이면 기록 시점 사용.
                설정 시 UTC datetime으로 변환해 각 Point의 _time에 ms 단위까지 저장.
+    measurement: 저장 measurement 이름 (예: plc, M, Y, D)
     """
     api = _get_client()
     if api is None:
@@ -76,21 +115,41 @@ def write_plc_batch(records: list, timestamp: float | None = None):
         # datetime(UTC)으로 넘겨야 클라이언트가 _time을 초 단위로 잘리지 않고 ms까지 저장함
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp is not None else None
         points = []
+        parquet_fields: dict[str, object] = {}
+        device_for_tag = ""
         for r in records:
             variable = r[0]
             value = r[1]
             device_type = r[2] if len(r) > 2 else ""
-            p = Point("plc").tag("variable", variable)
+            p = Point(measurement).tag("variable", variable)
+            if not device_for_tag and device_type:
+                device_for_tag = device_type
             if device_type:
                 p = p.tag("device", device_type)
-            if isinstance(value, (int, float)):
-                p = p.field("value", value)
+            if isinstance(value, (int, float, bool)):
+                fv = _field_value_for_influx(value)
+                p = p.field("value", fv)
+                parquet_fields[variable] = fv
             else:
-                p = p.field("value_str", str(value))
+                fv = str(value)
+                p = p.field("value_str", fv)
+                parquet_fields[variable] = fv
             if dt is not None:
                 p = p.time(dt)
             points.append(p)
         api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
+        # Parquet는 배치 1행(동일 시각의 다변수 묶음)으로 저장해 row 폭증을 방지.
+        append_point_to_parquet(
+            bucket=INFLUX_BUCKET,
+            measurement=measurement,
+            tags={
+                "device": device_for_tag,
+                "record_count": len(records),
+            },
+            fields=parquet_fields,
+            timestamp_ns=int(timestamp * 1_000_000_000) if timestamp is not None else None,
+            source="plc_writer_batch_compact",
+        )
         return True
     except Exception as e:
         err_parts = [str(e)]
@@ -100,7 +159,12 @@ def write_plc_batch(records: list, timestamp: float | None = None):
             err_parts.append(str(cause))
         err = " ".join(err_parts).lower()
         if "connection refused" in err or "errno 111" in err or "failed to establish" in err:
-            print("\n[InfluxDB] 8086 연결 안됨 → InfluxDB가 꺼져 있습니다. 먼저 실행하세요:\n  cd ~/plc/plc_test && sudo docker-compose -f docker-compose.influxdb.yml up -d\n", flush=True)
+            print(
+                "\n[InfluxDB] 연결 안됨 (%s) → InfluxDB 주소/포트·실행 여부를 확인하세요.\n"
+                "  예: cd Inzi/inzidisplay_dashboard && docker compose -f docker-compose.influxdb.yml up -d\n"
+                % (INFLUX_URL,),
+                flush=True,
+            )
         else:
             print("[InfluxDB] write 실패:", e, flush=True)
         return False
@@ -156,7 +220,7 @@ def export_plc_csv(start_iso: str, end_iso: str) -> tuple[str | None, str | None
     query = (
         f'from(bucket: "{INFLUX_BUCKET}") '
         f'|> range(start: time(v: "{start_}"), stop: time(v: "{end_}")) '
-        '|> filter(fn: (r) => r._measurement == "plc") '
+        '|> filter(fn: (r) => contains(value: r._measurement, set: ["M", "Y", "D", "plc"])) '
         '|> sort(columns: ["_time", "variable"])'
     )
     try:
@@ -212,7 +276,7 @@ def export_plc_csv_pivot(start_iso: str, end_iso: str, group_key: str) -> tuple[
     query = (
         f'from(bucket: "{INFLUX_BUCKET}") '
         f'|> range(start: time(v: "{start_}"), stop: time(v: "{end_}")) '
-        '|> filter(fn: (r) => r._measurement == "plc") '
+        '|> filter(fn: (r) => contains(value: r._measurement, set: ["M", "Y", "D", "plc"])) '
         '|> sort(columns: ["_time", "variable"])'
     )
     try:

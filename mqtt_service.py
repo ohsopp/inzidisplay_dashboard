@@ -19,6 +19,7 @@ from services.vibration_decode import (
     PDIN_PATHS,
 )
 from iolink_sensor_info import extract_sensor_info_from_mqtt
+from parquet_dual_writer import append_point_to_parquet
 
 
 def _safe_put(q, data):
@@ -54,6 +55,19 @@ def _save_vibration_to_influxdb(decoded_data):
             .field("crest", float(decoded_data.get('crest', 0)) if decoded_data.get('crest') is not None else 0) \
             .time(time.time_ns())
         state.write_api.write(bucket=INFLUXDB_BUCKET, record=point)
+        append_point_to_parquet(
+            bucket=INFLUXDB_BUCKET,
+            measurement="vibration",
+            tags={"sensor_type": "VVB001"},
+            fields={
+                "v_rms": float(decoded_data.get("v_rms", 0)) if decoded_data.get("v_rms") is not None else 0,
+                "a_peak": float(decoded_data.get("a_peak", 0)) if decoded_data.get("a_peak") is not None else 0,
+                "a_rms": float(decoded_data.get("a_rms", 0)) if decoded_data.get("a_rms") is not None else 0,
+                "temperature": float(decoded_data.get("temperature", 0)) if decoded_data.get("temperature") is not None else 0,
+                "crest": float(decoded_data.get("crest", 0)) if decoded_data.get("crest") is not None else 0,
+            },
+            source="mqtt_vibration",
+        )
         print(f"💾 Saved vibration data to InfluxDB (bucket: {INFLUXDB_BUCKET}): v_rms={decoded_data.get('v_rms')}, a_peak={decoded_data.get('a_peak')}, a_rms={decoded_data.get('a_rms')}")
     except Exception as e:
         print(f"❌ InfluxDB vibration write error: {e}")
@@ -107,6 +121,13 @@ def _on_message(client, userdata, msg):
                             try:
                                 point = Point("temperature").field("value", float(temperature)).time(time.time_ns())
                                 state.write_api.write(bucket=INFLUXDB_BUCKET, record=point)
+                                append_point_to_parquet(
+                                    bucket=INFLUXDB_BUCKET,
+                                    measurement="temperature",
+                                    tags={},
+                                    fields={"value": float(temperature)},
+                                    source="mqtt_tp3237",
+                                )
                                 print(f"💾 Saved to InfluxDB: {temperature}°C")
                             except Exception as e:
                                 print(f"❌ InfluxDB write error: {e}")
@@ -157,6 +178,13 @@ def _on_message(client, userdata, msg):
                         try:
                             point = Point("temperature").field("value", float(temperature)).time(time.time_ns())
                             state.write_api.write(bucket=INFLUXDB_BUCKET, record=point)
+                            append_point_to_parquet(
+                                bucket=INFLUXDB_BUCKET,
+                                measurement="temperature",
+                                tags={},
+                                fields={"value": float(temperature)},
+                                source="mqtt_generic",
+                            )
                             print(f"💾 Saved to InfluxDB: {temperature}°C")
                         except Exception as e:
                             print(f"❌ InfluxDB write error: {e}")
