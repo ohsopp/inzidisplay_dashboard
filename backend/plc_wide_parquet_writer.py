@@ -53,10 +53,41 @@ def _refresh_meta() -> tuple[list[str], set[str], set[str], pa.Schema]:
     col_order = sorted(set(names_50) | set(names_1s))
 
     string_names: set[str] = set()
-    for name, _dev, _addr, data_type, _length in get_mc_entries():
+    dword_names: set[str] = set()
+    string_stem_min_addr: dict[str, int] = {}
+    string_stem_min_name: dict[str, str] = {}
+    dword_stem_min_addr: dict[str, int] = {}
+    dword_stem_min_name: dict[str, str] = {}
+    for name, dev, addr, data_type, _length in get_mc_entries():
         dt = (data_type or "").strip().lower()
         if dt == "string":
             string_names.add(name)
+            # 문자열이 연속 워드 주소(D1560~D1567)로 펼쳐진 경우,
+            # 와이드 Parquet에는 대표 시작 주소 1개만 컬럼으로 유지한다.
+            # 예: currentDieName_D1560만 남기고 D1561~D1567은 제외.
+            if dev == "D" and "_D" in name:
+                stem = name.rsplit("_D", 1)[0]
+                prev = string_stem_min_addr.get(stem)
+                if prev is None or int(addr) < prev:
+                    string_stem_min_addr[stem] = int(addr)
+                    string_stem_min_name[stem] = name
+        elif dt == "dword":
+            dword_names.add(name)
+            # Dword가 시작/다음 워드 주소로 중복 정의된 경우(예: D1810, D1811),
+            # 와이드 Parquet에는 대표 시작 주소 1개만 컬럼으로 유지한다.
+            if dev == "D" and "_D" in name:
+                stem = name.rsplit("_D", 1)[0]
+                prev = dword_stem_min_addr.get(stem)
+                if prev is None or int(addr) < prev:
+                    dword_stem_min_addr[stem] = int(addr)
+                    dword_stem_min_name[stem] = name
+
+    if string_stem_min_name:
+        allowed_string_names = set(string_stem_min_name.values())
+        col_order = [n for n in col_order if (n not in string_names) or (n in allowed_string_names)]
+    if dword_stem_min_name:
+        allowed_dword_names = set(dword_stem_min_name.values())
+        col_order = [n for n in col_order if (n not in dword_names) or (n in allowed_dword_names)]
 
     fields = [
         pa.field("t_kst", pa.string()),
