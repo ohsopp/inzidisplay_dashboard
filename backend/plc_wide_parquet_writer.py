@@ -140,6 +140,36 @@ def invalidate_meta_cache() -> None:
         _meta_cache = None
 
 
+def get_wide_parquet_variable_names() -> frozenset[str]:
+    """
+    Parquet 와이드 테이블에 실제로 쓰이는 변수명 집합(문자열/dword 중복 stem은 최소 주소 1개만).
+    InfluxDB 기록을 Parquet와 맞출 때 사용.
+    """
+    col_order, _, _, _ = _ensure_meta()
+    return frozenset(col_order)
+
+
+def filter_parsed_to_wide_columns(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Parquet에 존재하는 컬럼만 남긴다(예: todayRunningTimeHour_D1057 제외, D1056만)."""
+    if not parsed:
+        return {}
+    allowed = get_wide_parquet_variable_names()
+    return {k: v for k, v in parsed.items() if k in allowed}
+
+
+def get_wide_column_names_for_export_interval(interval_key: str) -> list[str]:
+    """
+    Parquet 컬럼 순서와 동일하게, 폴링 그룹(50ms|1s)에 속한 변수명만 반환.
+    CSV 피벗 export 행 순서용.
+    """
+    if interval_key not in ("50ms", "1s"):
+        return []
+    col_order, set_50, set_1s, _ = _ensure_meta()
+    if interval_key == "50ms":
+        return [n for n in col_order if n in set_50]
+    return [n for n in col_order if n in set_1s]
+
+
 def _norm_incoming(v: Any) -> Any:
     if v == "-" or v is None:
         return None

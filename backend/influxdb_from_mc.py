@@ -1,13 +1,13 @@
 """
 대시보드 MC 폴러에서 받은 parsed 데이터를 InfluxDB에 기록.
-- measurement를 디바이스 타입(M/Y/D)으로 분리
-- 모든 변수·모든 값(숫자/문자 포함) 저장
+- measurement = 폴링 주기(50ms | 1s), tag variable (D/M/Y로 measurement 분리하지 않음)
+- Parquet 와이드와 동일한 변수만 기록(dword/string 중복 stem은 최소 주소 1개)
 - Parquet(와이드·일별 단일 파일)는 plc_wide_parquet_writer에서 처리
 """
 import time
 
-from mc_mapping import get_name_to_device
-from influxdb_writer import write_plc_batch
+from influxdb_writer import _resolve_batch_measurement, write_plc_batch
+from plc_wide_parquet_writer import filter_parsed_to_wide_columns
 
 _first_write_logged = False
 
@@ -18,7 +18,7 @@ def write_parsed_to_influx(
     """
     MC 폴러에서 받은 parsed {변수명: 값}을 규칙에 따라 InfluxDB에 기록.
     timestamp: 폴링 완료 시점(초 단위 float, time.time()). None이면 기록 시점 사용.
-    interval_key: 폴링 스레드 키(50ms|1s). 로깅용.
+    interval_key: 폴링 스레드 키(50ms|1s) → Influx measurement 이름으로 사용.
     """
     global _first_write_logged
     if not parsed:
@@ -32,60 +32,23 @@ def write_parsed_to_influx(
         except Exception as e:
             print("[PLC Wide Parquet] 기록 오류:", e, flush=True)
 
-    name_to_device = get_name_to_device()
-    wrote_any = False
+    filtered = filter_parsed_to_wide_columns(parsed)
+    if not filtered:
+        return
 
-    grouped_records = {"M": [], "Y": [], "D": []}
-    unknown_records = []
-    for name, val in parsed.items():
-        device = str(name_to_device.get(name) or "").strip().upper()
-        if device in grouped_records:
-            # 0/False/"0" 포함, 수신된 값을 그대로 저장한다.
-            grouped_records[device].append((name, val, device))
-        else:
-            unknown_records.append((name, val, ""))
+    records = [(name, val) for name, val in filtered.items()]
+    ok = write_plc_batch(records, timestamp=ts, interval_key=interval_key)
+    meas = _resolve_batch_measurement(None, interval_key)
 
-    for device in ("M", "Y", "D"):
-        records = grouped_records[device]
-        if not records:
-            continue
-        ok = write_plc_batch(
-            records,
-            timestamp=ts,
-            measurement=device,
-            interval_key=interval_key,
-        )
-        wrote_any = ok or wrote_any
-        if not _first_write_logged and not ok:
-            print(f"[InfluxDB] {device} 기록 실패 (연결/버킷 확인)", flush=True)
-
-    # 매핑되지 않은 변수는 호환성을 위해 plc measurement에 저장.
-    if unknown_records:
-        wrote_any = write_plc_batch(
-            unknown_records,
-            timestamp=ts,
-            measurement="plc",
-            interval_key=interval_key,
-        ) or wrote_any
-
-    # 첫 수신 시 한 번만 상세 로그 (원인 파악용)
     if not _first_write_logged:
         print(
-            "[InfluxDB] 수신 %d건(%s) → M:%d Y:%d D:%d unknown:%d 기록 시도"
+            "[InfluxDB] %s → measurement=%s %d건 기록 %s"
             % (
-                len(parsed),
-                interval_key or "unknown",
-                len(grouped_records["M"]),
-                len(grouped_records["Y"]),
-                len(grouped_records["D"]),
-                len(unknown_records),
+                interval_key or "?",
+                meas,
+                len(records),
+                "ok" if ok else "실패",
             ),
             flush=True,
         )
-        if wrote_any:
-            print("[InfluxDB] MC → InfluxDB 기록 완료 (이후 주기적 기록)", flush=True)
-            _first_write_logged = True
-        elif len(parsed) > 0 and not any(grouped_records.values()):
-            print("[InfluxDB] 원인: name_to_device 매칭 안됨 (수신 이름과 mc_fake_values.json name 불일치?)", flush=True)
-            _first_write_logged = True  # 한 번만 로그
-        _first_write_logged = True  # 상세 로그는 첫 1회만
+        _first_write_logged = True

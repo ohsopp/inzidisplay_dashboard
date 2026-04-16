@@ -1,11 +1,34 @@
 """
 PLC 수집 데이터를 InfluxDB 2.x에 기록.
-기본 measurement는 plc이며, 호출부에서 M/Y/D 등으로 지정 가능.
-tag: variable=이름, field: value 또는 value_str
+- PLC MC 경로: measurement = 폴링 주기 이름(50ms | 1s | 1h), tag variable, field value
+  (D/M/Y 디바이스로 measurement를 나누지 않음. 구버전 measurement는 조회 호환용으로 Flux에만 포함)
 """
 from datetime import datetime, timezone
 
 from influxdb_config import INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, INFLUX_BUCKET, is_configured
+
+# 테스트·수동 기록 등 주기 없을 때만 사용
+PLC_INFLUX_MEASUREMENT = "plc_data"
+
+_INTERVAL_MEASUREMENTS = frozenset({"50ms", "1s", "1h"})
+
+_LEGACY_PLC_MEASUREMENTS = frozenset(
+    {"50ms", "1s", "1h", "plc_data", "plc", "M", "Y", "D"}
+)
+
+
+def _resolve_batch_measurement(measurement: str | None, interval_key: str | None) -> str:
+    """호출부가 measurement를 안 넘기면 interval_key(50ms|1s|1h)를 measurement 이름으로 쓴다."""
+    if measurement is not None:
+        return measurement
+    if interval_key in _INTERVAL_MEASUREMENTS:
+        return interval_key
+    return PLC_INFLUX_MEASUREMENT
+
+
+def _plc_measurement_flux_set() -> str:
+    return ", ".join(f'"{m}"' for m in sorted(_LEGACY_PLC_MEASUREMENTS))
+
 
 _client = None
 _write_api = None
@@ -53,7 +76,7 @@ def _get_client_obj():
     return _client
 
 
-def write_plc_point(variable: str, value, device_type: str = "", measurement: str = "plc"):
+def write_plc_point(variable: str, value, device_type: str = "", measurement: str = PLC_INFLUX_MEASUREMENT):
     """
     단일 변수 한 점 기록.
     value: int, float, str (문자열은 field "value_str" 사용)
@@ -83,7 +106,7 @@ def write_plc_point(variable: str, value, device_type: str = "", measurement: st
 def write_plc_batch(
     records: list,
     timestamp: float | None = None,
-    measurement: str = "plc",
+    measurement: str | None = None,
     interval_key: str | None = None,
 ):
     """
@@ -91,9 +114,10 @@ def write_plc_batch(
     device_type 생략 시 "" 사용.
     timestamp: 폴링 완료 시점(초 단위 float, time.time()). None이면 기록 시점 사용.
                설정 시 UTC datetime으로 변환해 각 Point의 _time에 ms 단위까지 저장.
-    measurement: 저장 measurement 이름 (예: plc, M, Y, D)
-    interval_key: 로깅/호환용(Parquet는 plc_wide_parquet_writer 사용)
+    measurement: None이면 interval_key(50ms|1s|1h)를 measurement 이름으로 사용, 없으면 plc_data.
+    interval_key: 주기가 measurement와 같을 때는 중복이므로 interval 태그를 붙이지 않음.
     """
+    resolved = _resolve_batch_measurement(measurement, interval_key)
     api = _get_client()
     if api is None:
         return False
@@ -104,14 +128,13 @@ def write_plc_batch(
         # datetime(UTC)으로 넘겨야 클라이언트가 _time을 초 단위로 잘리지 않고 ms까지 저장함
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp is not None else None
         points = []
-        device_for_tag = ""
         for r in records:
             variable = r[0]
             value = r[1]
             device_type = r[2] if len(r) > 2 else ""
-            p = Point(measurement).tag("variable", variable)
-            if not device_for_tag and device_type:
-                device_for_tag = device_type
+            p = Point(resolved).tag("variable", variable)
+            if interval_key and resolved == PLC_INFLUX_MEASUREMENT:
+                p = p.tag("interval", interval_key)
             if device_type:
                 p = p.tag("device", device_type)
             if isinstance(value, (int, float, bool)):
@@ -192,10 +215,11 @@ def export_plc_csv(start_iso: str, end_iso: str) -> tuple[str | None, str | None
         start_ = start_ + "Z"
     if not end_.endswith("Z") and "+" not in end_:
         end_ = end_ + "Z"
+    ms = _plc_measurement_flux_set()
     query = (
         f'from(bucket: "{INFLUX_BUCKET}") '
         f'|> range(start: time(v: "{start_}"), stop: time(v: "{end_}")) '
-        '|> filter(fn: (r) => contains(value: r._measurement, set: ["M", "Y", "D", "plc"])) '
+        f'|> filter(fn: (r) => contains(value: r._measurement, set: [{ms}])) '
         '|> sort(columns: ["_time", "variable"])'
     )
     try:
@@ -233,7 +257,8 @@ def export_plc_csv_pivot(start_iso: str, end_iso: str, group_key: str) -> tuple[
     import csv
     import io
 
-    from mc_mapping import POLL_INTERVAL_KEYS, get_variable_names_by_poll_interval
+    from mc_mapping import POLL_INTERVAL_KEYS
+    from plc_wide_parquet_writer import get_wide_column_names_for_export_interval
 
     if group_key not in POLL_INTERVAL_KEYS:
         return None, f"지원하지 않는 그룹입니다. 사용 가능: {', '.join(POLL_INTERVAL_KEYS)}"
@@ -248,10 +273,11 @@ def export_plc_csv_pivot(start_iso: str, end_iso: str, group_key: str) -> tuple[
         start_ = start_ + "Z"
     if not end_.endswith("Z") and "+" not in end_:
         end_ = end_ + "Z"
+    ms = _plc_measurement_flux_set()
     query = (
         f'from(bucket: "{INFLUX_BUCKET}") '
         f'|> range(start: time(v: "{start_}"), stop: time(v: "{end_}")) '
-        '|> filter(fn: (r) => contains(value: r._measurement, set: ["M", "Y", "D", "plc"])) '
+        f'|> filter(fn: (r) => contains(value: r._measurement, set: [{ms}])) '
         '|> sort(columns: ["_time", "variable"])'
     )
     try:
@@ -315,6 +341,14 @@ def export_plc_csv_pivot(start_iso: str, end_iso: str, group_key: str) -> tuple[
             vals = getattr(record, "values", {}) or {}
             t_key = _time_to_utc_key(vals.get("_time"))
             var = vals.get("variable", "")
+            meas = str(vals.get("_measurement", "") or "")
+            row_iv = vals.get("interval")
+            if meas == group_key:
+                pass
+            elif meas == PLC_INFLUX_MEASUREMENT and str(row_iv or "") == group_key:
+                pass
+            else:
+                continue
             val = vals.get("_value", "")
             if isinstance(val, (int, float)):
                 val = str(val)
@@ -322,7 +356,7 @@ def export_plc_csv_pivot(start_iso: str, end_iso: str, group_key: str) -> tuple[
                 val = str(val) if val is not None else ""
             if var and t_key:
                 data[(var, t_key)] = val
-    var_names = get_variable_names_by_poll_interval().get(group_key, [])
+    var_names = get_wide_column_names_for_export_interval(group_key)
     if not var_names:
         return None, f"해당 그룹({group_key})에 변수가 없습니다."
     allowed = frozenset(var_names)

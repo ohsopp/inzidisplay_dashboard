@@ -10,6 +10,7 @@ import time
 from mc_mapping import get_mc_entries_by_device, get_mc_entries_hourly_d
 from plc_mcprotocol import read_mc_variables
 from influxdb_writer import write_plc_batch
+from plc_wide_parquet_writer import filter_parsed_to_wide_columns
 
 
 INTERVAL_M_Y_SEC = 1.0
@@ -30,13 +31,13 @@ def _run_m_poller(host: str, port: int, stop_event: threading.Event):
         if stop_event.wait(INTERVAL_M_Y_SEC):
             break
         try:
-            parsed = read_mc_variables(host, port, entries)
+            parsed = filter_parsed_to_wide_columns(read_mc_variables(host, port, entries))
             records = []
             for name, val in parsed.items():
                 if val == 1 or val == "1" or (isinstance(val, (int, float)) and val == 1):
-                    records.append((name, 1, "M"))
+                    records.append((name, 1))
             if records:
-                if write_plc_batch(records) and not _influx_first_write_logged["M"]:
+                if write_plc_batch(records, interval_key="1s") and not _influx_first_write_logged["M"]:
                     print("[InfluxDB] 첫 기록 (M) %d건" % len(records), flush=True)
                     _influx_first_write_logged["M"] = True
         except Exception as e:
@@ -53,10 +54,10 @@ def _run_y_poller(host: str, port: int, stop_event: threading.Event):
         if stop_event.wait(INTERVAL_M_Y_SEC):
             break
         try:
-            parsed = read_mc_variables(host, port, entries)
-            records = [(name, val, "Y") for name, val in parsed.items() if val != "-"]
+            parsed = filter_parsed_to_wide_columns(read_mc_variables(host, port, entries))
+            records = [(name, val) for name, val in parsed.items() if val != "-"]
             if records:
-                if write_plc_batch(records) and not _influx_first_write_logged["Y"]:
+                if write_plc_batch(records, interval_key="1s") and not _influx_first_write_logged["Y"]:
                     print("[InfluxDB] 첫 기록 (Y) %d건" % len(records), flush=True)
                     _influx_first_write_logged["Y"] = True
         except Exception as e:
@@ -73,10 +74,10 @@ def _run_d_poller(host: str, port: int, stop_event: threading.Event):
         if stop_event.wait(INTERVAL_D_MS):
             break
         try:
-            parsed = read_mc_variables(host, port, entries)
-            records = [(name, val, "D") for name, val in parsed.items() if val != "-"]
+            parsed = filter_parsed_to_wide_columns(read_mc_variables(host, port, entries))
+            records = [(name, val) for name, val in parsed.items() if val != "-"]
             if records:
-                if write_plc_batch(records) and not _influx_first_write_logged["D"]:
+                if write_plc_batch(records, interval_key="50ms") and not _influx_first_write_logged["D"]:
                     print("[InfluxDB] 첫 기록 (D) %d건" % len(records), flush=True)
                     _influx_first_write_logged["D"] = True
         except Exception as e:
@@ -93,10 +94,10 @@ def _run_d_hourly_poller(host: str, port: int, stop_event: threading.Event):
         if stop_event.wait(INTERVAL_D_HOURLY_SEC):
             break
         try:
-            parsed = read_mc_variables(host, port, entries)
-            records = [(name, val, "D") for name, val in parsed.items() if val != "-"]
+            parsed = filter_parsed_to_wide_columns(read_mc_variables(host, port, entries))
+            records = [(name, val) for name, val in parsed.items() if val != "-"]
             if records:
-                if write_plc_batch(records) and not _influx_first_write_logged["D_hourly"]:
+                if write_plc_batch(records, interval_key="1h") and not _influx_first_write_logged["D_hourly"]:
                     print("[InfluxDB] 첫 기록 (D 1시간) %d건" % len(records), flush=True)
                     _influx_first_write_logged["D_hourly"] = True
         except Exception as e:

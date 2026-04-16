@@ -429,11 +429,11 @@ def influxdb_status():
 
 @app.route("/api/influxdb/test-write", methods=["POST", "GET"])
 def influxdb_test_write():
-    """테스트용 포인트 1건 기록. 대시보드에서 measurement 'plc', tag 확인용."""
+    """테스트용 포인트 1건 기록. measurement plc_data(기본), tag variable 확인용."""
     try:
         from influxdb_writer import write_plc_point
         if write_plc_point("_test_ping", 1, "test"):
-            return {"ok": True, "message": "테스트 기록 완료. 대시보드에서 Bucket → measurement 'plc' 선택"}
+            return {"ok": True, "message": "테스트 기록 완료. Bucket plc_data → measurement plc_data → variable"}
         return {"ok": False, "message": "InfluxDB 연결/기록 실패"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
