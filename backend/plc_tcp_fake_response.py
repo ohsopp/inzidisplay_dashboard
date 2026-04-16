@@ -132,8 +132,177 @@ def _addr_to_config_key(letter: str, addr: int, config: dict) -> str | None:
     return None
 
 
+def _parse_config_addr(key: str) -> tuple[str, int] | None:
+    if not key or len(key) < 2:
+        return None
+    letter = key[0].upper()
+    suffix = key[1:].strip().upper()
+    if not suffix:
+        return None
+    try:
+        if letter == "Y" or any(ch in "ABCDEF" for ch in suffix):
+            return (letter, int(suffix, 16))
+        return (letter, int(suffix, 10))
+    except ValueError:
+        return None
+
+
+def _string_word_at(letter: str, addr: int, config: dict) -> bytes:
+    """
+    D 문자열을 워드 단위로 읽을 때, 문자열 시작 주소로부터 오프셋 워드를 반환.
+    예) D1560 length=16 인 경우 D1560..D1567 읽기에서 각 주소에 맞는 2바이트를 돌려준다.
+    """
+    best_base = None
+    best_entry = None
+    best_nonempty_base = None
+    best_nonempty_entry = None
+    for key, entry in config.items():
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("dataType") or "").strip().lower() != "string":
+            continue
+        parsed = _parse_config_addr(key)
+        if not parsed:
+            continue
+        dev, base = parsed
+        if dev != letter:
+            continue
+        slen = max(1, int(entry.get("length") or 1))
+        words = (slen + 1) // 2
+        if base <= addr < (base + words):
+            value = entry.get("value")
+            has_value = bool(str(value)) if value is not None else False
+            if has_value:
+                # 연속 문자열 슬롯(D1560~D1567)에 빈 엔트리가 있을 때,
+                # 실제 문자열이 들어있는 시작 주소(보통 더 낮은 주소)를 우선 사용한다.
+                if best_nonempty_base is None or base < best_nonempty_base:
+                    best_nonempty_base = base
+                    best_nonempty_entry = entry
+            if best_base is None or base > best_base:
+                best_base = base
+                best_entry = entry
+    if best_nonempty_entry is not None and best_nonempty_base is not None:
+        best_entry = best_nonempty_entry
+        best_base = best_nonempty_base
+    if best_entry is None or best_base is None:
+        return word_to_le_bytes(0)
+    raw = build_read_data_from_entry(best_entry)
+    off = (addr - best_base) * 2
+    if off + 2 <= len(raw):
+        return raw[off : off + 2]
+    return word_to_le_bytes(0)
+
+
+def pack_mc_batch_bits_binary(bits: list[int]) -> bytes:
+    """pymcprotocol Type3E batchread_bitunits(COMMTYPE_BINARY) 응답과 동일: 2비트/바이트(짝=nibble4, 홀=bit0)."""
+    out = bytearray()
+    for i in range(0, len(bits), 2):
+        b = 0
+        if bits[i]:
+            b |= 1 << 4
+        if i + 1 < len(bits) and bits[i + 1]:
+            b |= 1 << 0
+        out.append(b)
+    return bytes(out)
+
+
+def build_read_data_batch_0401(body: bytes, config: dict) -> bytes | None:
+    """
+    0x0401 배치 읽기: points(비트 또는 워드)만큼 read_data 길이를 채운다.
+    (블록 읽기 최적화 전에는 요청 1점=응답 1점이었으나, 실제 PLC·pymcprotocol은 readsize 전체를 기대한다.)
+    """
+    if len(body) < 12:
+        return None
+    subcmd = body[4] | (body[5] << 8)
+    start_addr = body[6] | (body[7] << 8) | (body[8] << 16)
+    device = body[9]
+    points = body[10] | (body[11] << 8)
+    letter = DEVICE_CODE_TO_LETTER.get(device)
+    if letter is None or points <= 0 or points > 65535:
+        return None
+
+    # 비트 배치: Q/L 0x0001, iQ-R 0x0003
+    if subcmd in (0x0001, 0x0003):
+        bits: list[int] = []
+        for i in range(points):
+            key = _addr_to_config_key(letter, start_addr + i, config)
+            if key and key in config:
+                val = config[key].get("value")
+                bits.append(1 if val else 0)
+            else:
+                bits.append(0)
+        return pack_mc_batch_bits_binary(bits)
+
+    # 워드 배치: Q 0x0000, iQ-R 0x0002
+    if subcmd in (0x0000, 0x0002):
+        out = bytearray()
+        for i in range(points):
+            cur_addr = start_addr + i
+            key = _addr_to_config_key(letter, cur_addr, config)
+            if key and key in config:
+                raw = build_read_data_from_entry(config[key])
+                t = (config[key].get("dataType") or "").strip().lower()
+                if t == "dword":
+                    out.extend(raw[:2])
+                elif t == "string":
+                    out.extend(_string_word_at(letter, cur_addr, config))
+                else:
+                    out.extend(raw[:2] if len(raw) >= 2 else word_to_le_bytes(0))
+            else:
+                out.extend(_string_word_at(letter, cur_addr, config))
+        return bytes(out)
+
+    return None
+
+
+def build_read_data_batch_0403(body: bytes, config: dict) -> bytes | None:
+    """0x0403 랜덤 읽기: word 개×2바이트 + dword 개×4바이트 순서로 이어 붙인다."""
+    if len(body) < 8:
+        return None
+    word_size = body[6]
+    dword_size = body[7]
+    need = 8 + (word_size + dword_size) * 4
+    if len(body) < need:
+        return None
+
+    out = bytearray()
+    offset = 8
+    for _ in range(word_size):
+        addr = body[offset] | (body[offset + 1] << 8) | (body[offset + 2] << 16)
+        device = body[offset + 3]
+        offset += 4
+        letter = DEVICE_CODE_TO_LETTER.get(device)
+        key = _addr_to_config_key(letter, addr, config) if letter else None
+        if key and key in config:
+            raw = build_read_data_from_entry(config[key])
+            t = (config[key].get("dataType") or "").strip().lower()
+            if t == "string" and letter:
+                out.extend(_string_word_at(letter, addr, config))
+            else:
+                out.extend(raw[:2] if len(raw) >= 2 else word_to_le_bytes(0))
+        else:
+            if letter:
+                out.extend(_string_word_at(letter, addr, config))
+            else:
+                out.extend(word_to_le_bytes(0))
+
+    for _ in range(dword_size):
+        addr = body[offset] | (body[offset + 1] << 8) | (body[offset + 2] << 16)
+        device = body[offset + 3]
+        offset += 4
+        letter = DEVICE_CODE_TO_LETTER.get(device)
+        key = _addr_to_config_key(letter, addr, config) if letter else None
+        if key and key in config:
+            raw = build_read_data_from_entry(config[key])
+            out.extend(raw[:4] if len(raw) >= 4 else dword_to_read_data_le(0))
+        else:
+            out.extend(dword_to_read_data_le(0))
+
+    return bytes(out)
+
+
 def match_request(body: bytes, config: dict) -> str | None:
-    """요청 바디를 파싱해 config에 있는 키(예: D140, M300)를 반환. 없으면 None."""
+    """단일 키만 필요할 때(레거시 폴백). 배치 요청은 build_read_data_batch_* 사용."""
     if len(body) < 8:
         return None
     cmd = body[2] | (body[3] << 8)
@@ -198,21 +367,52 @@ def handle_client(conn: socket.socket):
             continue
 
         config = load_mc_fake_values()
-        kind = match_request(body, config)
-        if kind and kind in config:
-            read_data = build_read_data_from_entry(config[kind])
+        cmd = body[2] | (body[3] << 8)
+        read_data: bytes
+        log_key: str | None = None
+
+        if cmd == 0x0401:
+            built = build_read_data_batch_0401(body, config)
+            if built is not None:
+                read_data = built
+                log_key = f"0401_batch({len(read_data)}B)"
+            else:
+                log_key = match_request(body, config)
+                if log_key and log_key in config:
+                    read_data = build_read_data_from_entry(config[log_key])
+                else:
+                    read_data = word_to_le_bytes(0)
+                    if log_key is None and len(body) >= 12:
+                        addr = body[6] | (body[7] << 8) | (body[8] << 16)
+                        device = body[9]
+                        points = body[10] | (body[11] << 8)
+                        print(f"  → 미매칭(0401): body(hex)={body.hex()}, addr=0x{addr:X} device=0x{device:X} points={points}")
+        elif cmd == 0x0403:
+            built = build_read_data_batch_0403(body, config)
+            if built is not None:
+                read_data = built
+                log_key = f"0403_random({len(read_data)}B)"
+            else:
+                log_key = match_request(body, config)
+                if log_key and log_key in config:
+                    read_data = build_read_data_from_entry(config[log_key])
+                else:
+                    read_data = word_to_le_bytes(0)
+                    if log_key is None:
+                        print(f"  → 미매칭(0403): body(hex)={body.hex()}")
         else:
-            read_data = word_to_le_bytes(0)
-            if kind is None:
-                addr = body[6] | (body[7] << 8) | (body[8] << 16)
-                device = body[9]
-                points = body[10] | (body[11] << 8)
-                print(f"  → 미매칭: body(hex)={body.hex()}, addr=0x{addr:X} device=0x{device:X} points={points}")
+            log_key = match_request(body, config)
+            if log_key and log_key in config:
+                read_data = build_read_data_from_entry(config[log_key])
+            else:
+                read_data = word_to_le_bytes(0)
+                if log_key is None:
+                    print(f"  → 미매칭: cmd=0x{cmd:X} body(hex)={body.hex()}")
 
         resp = build_3e_response(read_data)
         conn.sendall(resp)
-        if kind:
-            print(f"  → {kind}, read_data={read_data.hex()}, 응답 {len(resp)} bytes")
+        if log_key:
+            print(f"  → {log_key}, read_data={read_data.hex()}, 응답 {len(resp)} bytes")
 
 
 def main():

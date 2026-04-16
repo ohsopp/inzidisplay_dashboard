@@ -18,6 +18,11 @@ except ImportError:
 PLC_HOST = "192.168.0.5"
 PLC_PORT = 5002
 DEBUG_ERRORS = (os.environ.get("MC_POLL_DEBUG_ERRORS", "").strip().lower() in ("1", "true", "yes", "on"))
+# 블록 읽기 상한(PLC/프레임 제한 완화). 구간이 크면 여러 번 나눠 읽고 이어 붙인다.
+_MAX_BIT_READSIZE = max(1, int(os.environ.get("MC_MAX_BIT_READSIZE", "2048") or "2048"))
+_MAX_WORD_READSIZE = max(1, int(os.environ.get("MC_MAX_WORD_READSIZE", "960") or "960"))
+# dword 랜덤읽기: 한 프레임에 넣을 최대 개수(과대 시 청크)
+_MAX_DWORD_RANDOMREAD = max(1, int(os.environ.get("MC_MAX_DWORD_RANDOMREAD", "64") or "64"))
 
 def parse_address(s: str) -> int:
     """주소 문자열 해석. 0x 접두사 있으면 16진수, 없으면 10진수."""
@@ -35,10 +40,64 @@ def device_to_headdevice(device: str, address: int) -> str:
     return f"{d}{address}"
 
 
+def _merge_half_open_intervals(items: list[tuple[int, int, tuple]]) -> list[tuple[int, int, list]]:
+    """
+    items: (start, end_exclusive, payload) 구간들을 정렬 후 겹치거나 맞닿는 구간끼리 병합.
+    반환: (merged_start, merged_end, payloads_in_order)
+    """
+    if not items:
+        return []
+    items = sorted(items, key=lambda x: x[0])
+    out = []
+    cur_s, cur_e, payloads = items[0][0], items[0][1], [items[0][2]]
+    for s, e, p in items[1:]:
+        if s <= cur_e:
+            cur_e = max(cur_e, e)
+            payloads.append(p)
+        else:
+            out.append((cur_s, cur_e, payloads))
+            cur_s, cur_e, payloads = s, e, [p]
+    out.append((cur_s, cur_e, payloads))
+    return out
+
+
+def _read_bits_span(plc, device: str, bs: int, be: int) -> list:
+    """[bs, be) 비트 구간을 상한 단위로 나눠 읽고 한 리스트로 이어 붙인다."""
+    vals: list = []
+    pos = bs
+    while pos < be:
+        chunk_end = min(be, pos + _MAX_BIT_READSIZE)
+        hd = device_to_headdevice(device, pos)
+        vals.extend(plc.batchread_bitunits(hd, readsize=chunk_end - pos))
+        pos = chunk_end
+    return vals
+
+
+def _read_words_span(plc, device: str, bs: int, be: int) -> list:
+    """[bs, be) 워드 구간을 상한 단위로 나눠 읽고 한 리스트로 이어 붙인다."""
+    vals: list = []
+    pos = bs
+    while pos < be:
+        chunk_end = min(be, pos + _MAX_WORD_READSIZE)
+        hd = device_to_headdevice(device, pos)
+        vals.extend(plc.batchread_wordunits(hd, readsize=chunk_end - pos))
+        pos = chunk_end
+    return vals
+
+
+def _words_for_string(length: int) -> int:
+    return max(1, (int(length) + 1) // 2)
+
+
 def read_mc_variables(host: str, port: int, entries: list) -> dict:
     """
-    host:port에 pymcprotocol API만으로 읽기. 반환: {변수명: 값}. 실패 시 '-'.
-    청크 단위로 연결 1회 유지, 읽기 실패 시 1회 재연결 후 재시도.
+    host:port에 pymcprotocol(Type3E) TCP로 읽기. 반환: {변수명: 값}. 실패 시 '-'.
+
+    테스트 시에는 가짜 PLC(mc_fake 서버)에 붙고, 현장에서는 동일 코드로 실제 PLC에 붙는다.
+    폴링 대상 목록은 mc_fake_values.json(매핑)에서 오며, 읽기 경로는 항상 pymcprotocol이다.
+
+    같은 디바이스·같은 타입에서 주소가 이어지면 batchread_*로 묶어 MC 왕복 횟수를 줄인다.
+    dword는 randomread로 가능한 한 한 프레임에 묶는다.
     """
     result = {name: "-" for name, *_ in entries}
     if not entries:
@@ -70,49 +129,190 @@ def read_mc_variables(host: str, port: int, entries: list) -> dict:
         connected = False
         return _connect()
 
+    def _run_read(label: str, op):
+        """한 번 시도, 실패 시 재연결 후 1회 재시도. 실패 시 예외 전파."""
+        tried = False
+        while True:
+            try:
+                return op()
+            except Exception as e:
+                if tried:
+                    if DEBUG_ERRORS:
+                        print(f"[MC] read 실패 {label}: {e}", flush=True)
+                    raise
+                tried = True
+                if not _reconnect():
+                    if DEBUG_ERRORS:
+                        print(f"[MC] reconnect 실패 후 read 중단: {label}", flush=True)
+                    raise
+                continue
+
     if not _connect():
         return result
 
-    for name, device, address, data_type, length in entries:
-        headdevice = device_to_headdevice(device, address)
+    grouped: dict[str, list] = {}
+    for row in entries:
+        name, _device, _addr, data_type, _length = row
         t = (data_type or "").strip().lower()
-        tried_reconnect = False
-        while True:
-            try:
-                if t == "boolean":
-                    vals = plc.batchread_bitunits(headdevice, readsize=length)
-                    result[name] = vals[0] if vals else "-"
-                elif t == "word":
-                    vals = plc.batchread_wordunits(headdevice, readsize=length)
-                    result[name] = vals[0] if vals else "-"
-                elif t == "dword":
-                    _, dword_vals = plc.randomread(word_devices=[], dword_devices=[headdevice])
-                    result[name] = dword_vals[0] if dword_vals else "-"
-                elif t == "string":
-                    words = plc.batchread_wordunits(headdevice, readsize=(length + 1) // 2)
-                    b = b"".join(bytes([w & 0xFF, (w >> 8) & 0xFF]) for w in words)
-                    s = b[:length].decode("ascii", errors="replace").rstrip("\x00")
-                    result[name] = s or "-"
-                else:
-                    vals = plc.batchread_wordunits(headdevice, readsize=max(1, length))
-                    result[name] = vals[0] if vals else "-"
-                break
-            except Exception as e:
-                if tried_reconnect:
-                    if DEBUG_ERRORS:
-                        print(f"[MC] read 실패 {name}({headdevice}, {t}): {e}", flush=True)
-                    break
-                tried_reconnect = True
-                if not _reconnect():
-                    if DEBUG_ERRORS:
-                        print(f"[MC] reconnect 실패 후 read 중단: {name}", flush=True)
-                    break
-                continue
+        if t not in grouped:
+            grouped[t] = []
+        grouped[t].append(row)
 
     try:
-        plc.close()
-    except Exception:
-        pass
+        # --- boolean: 디바이스별 연속 비트 구간 병합 ---
+        bool_rows = grouped.get("boolean", [])
+        by_dev: dict[str, list] = {}
+        for name, device, address, data_type, length in bool_rows:
+            ln = max(1, int(length or 1))
+            by_dev.setdefault(device, []).append((name, int(address), ln))
+
+        for device, rows in by_dev.items():
+            intervals = []
+            for name, addr, ln in rows:
+                intervals.append((addr, addr + ln, (name, addr, ln)))
+            for bs, be, payloads in _merge_half_open_intervals(intervals):
+                try:
+                    vals = _run_read(
+                        f"boolean {device}[{bs},{be})",
+                        lambda: _read_bits_span(plc, device, bs, be),
+                    )
+                except Exception:
+                    for name, addr, ln in payloads:
+                        result[name] = "-"
+                    continue
+                for name, addr, ln in payloads:
+                    off = addr - bs
+                    if off + ln <= len(vals) and off >= 0:
+                        result[name] = vals[off] if ln == 1 else vals[off]
+                    else:
+                        result[name] = "-"
+
+        # --- word: 디바이스별 연속 워드 구간 병합 ---
+        word_rows = grouped.get("word", [])
+        by_dev_w: dict[str, list] = {}
+        for name, device, address, data_type, length in word_rows:
+            ln = max(1, int(length or 1))
+            by_dev_w.setdefault(device, []).append((name, int(address), ln))
+
+        for device, rows in by_dev_w.items():
+            intervals = []
+            for name, addr, ln in rows:
+                intervals.append((addr, addr + ln, (name, addr, ln)))
+            for bs, be, payloads in _merge_half_open_intervals(intervals):
+                try:
+                    vals = _run_read(
+                        f"word {device}[{bs},{be})",
+                        lambda bs=bs, be=be, dev=device: _read_words_span(plc, dev, bs, be),
+                    )
+                except Exception:
+                    for name, addr, ln in payloads:
+                        result[name] = "-"
+                    continue
+                for name, addr, ln in payloads:
+                    off = addr - bs
+                    if off + ln <= len(vals) and off >= 0:
+                        result[name] = vals[off] if ln == 1 else vals[off : off + ln][0]
+                    else:
+                        result[name] = "-"
+
+        # --- string: 워드 구간 병합 후 디코드 ---
+        str_rows = grouped.get("string", [])
+        by_dev_s: dict[str, list] = {}
+        for name, device, address, data_type, length in str_rows:
+            slen = max(1, int(length or 1))
+            nw = _words_for_string(slen)
+            by_dev_s.setdefault(device, []).append((name, int(address), slen, nw))
+
+        for device, rows in by_dev_s.items():
+            intervals = []
+            for name, addr, slen, nw in rows:
+                intervals.append((addr, addr + nw, (name, addr, slen, nw)))
+            for bs, be, payloads in _merge_half_open_intervals(intervals):
+                try:
+                    vals = _run_read(
+                        f"string {device}[{bs},{be})",
+                        lambda bs=bs, be=be, dev=device: _read_words_span(plc, dev, bs, be),
+                    )
+                except Exception:
+                    for name, addr, slen, nw in payloads:
+                        result[name] = "-"
+                    continue
+                for name, addr, slen, nw in payloads:
+                    off = addr - bs
+                    if off + nw <= len(vals) and off >= 0:
+                        chunk = vals[off : off + nw]
+                        b = b"".join(bytes([w & 0xFF, (w >> 8) & 0xFF]) for w in chunk)
+                        s = b[:slen].decode("ascii", errors="replace").rstrip("\x00")
+                        result[name] = s or "-"
+                    else:
+                        result[name] = "-"
+
+        # --- dword: randomread로 한 프레임에 묶기(청크) ---
+        dword_rows = grouped.get("dword", [])
+        if dword_rows:
+            heads_order: list[str] = []
+            order_names: list[str] = []
+            for name, device, address, data_type, length in dword_rows:
+                heads_order.append(device_to_headdevice(device, int(address)))
+                order_names.append(name)
+            for i in range(0, len(heads_order), _MAX_DWORD_RANDOMREAD):
+                chunk_h = heads_order[i : i + _MAX_DWORD_RANDOMREAD]
+                chunk_n = order_names[i : i + _MAX_DWORD_RANDOMREAD]
+                try:
+                    _wv, dword_vals = _run_read(
+                        f"dword randomread x{len(chunk_h)}",
+                        lambda h=chunk_h: plc.randomread(word_devices=[], dword_devices=h),
+                    )
+                except Exception:
+                    for n in chunk_n:
+                        result[n] = "-"
+                    continue
+                if len(dword_vals) != len(chunk_n):
+                    for n in chunk_n:
+                        result[n] = "-"
+                    continue
+                for n, dv in zip(chunk_n, dword_vals):
+                    result[n] = dv
+
+        # --- 기타 타입: word와 동일하게 워드 블록 병합 ---
+        other_rows = []
+        for t, rows in grouped.items():
+            if t in ("boolean", "word", "dword", "string"):
+                continue
+            other_rows.extend(rows)
+
+        by_dev_o: dict[str, list] = {}
+        for name, device, address, data_type, length in other_rows:
+            ln = max(1, int(length or 1))
+            by_dev_o.setdefault(device, []).append((name, int(address), ln))
+
+        for device, rows in by_dev_o.items():
+            intervals = []
+            for name, addr, ln in rows:
+                intervals.append((addr, addr + ln, (name, addr, ln)))
+            for bs, be, payloads in _merge_half_open_intervals(intervals):
+                try:
+                    vals = _run_read(
+                        f"fallback-word {device}[{bs},{be})",
+                        lambda bs=bs, be=be, dev=device: _read_words_span(plc, dev, bs, be),
+                    )
+                except Exception:
+                    for name, addr, ln in payloads:
+                        result[name] = "-"
+                    continue
+                for name, addr, ln in payloads:
+                    off = addr - bs
+                    if off + ln <= len(vals) and off >= 0:
+                        result[name] = vals[off] if ln == 1 else vals[off : off + ln][0]
+                    else:
+                        result[name] = "-"
+
+    finally:
+        try:
+            plc.close()
+        except Exception:
+            pass
+
     return result
 
 
