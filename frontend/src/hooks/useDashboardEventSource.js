@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { buildEventsUrl } from '../utils/api'
 import {
   parseVibrationTrendPoint,
-  parseTemperatureTrendPoint,
   SENSOR_TREND_MAX_POINTS,
 } from '../utils/sensorTrendParse'
 
@@ -20,6 +19,11 @@ export default function useDashboardEventSource({
 }) {
   const eventSourceRef = useRef(null)
   const reconnectTimerRef = useRef(null)
+  const normalizeVibrationTopic = (topic) => {
+    if (topic === 'VVB001(A)' || topic === 'VVB001-A') return 'VVB001(A)'
+    if (topic === 'VVB001(B)' || topic === 'VVB001-B') return 'VVB001(B)'
+    return ''
+  }
 
   useEffect(() => {
     let isUnmounted = false
@@ -80,25 +84,15 @@ export default function useDashboardEventSource({
 
       es.addEventListener('sensor_data', (e) => {
         const data = JSON.parse(e.data || '{}')
-        const topic = data.topic
-        if (topic) {
+        const normalizedTopic = normalizeVibrationTopic(data.topic)
+        if (normalizedTopic) {
           const ts = Number(data.ts) || Date.now() / 1000
-          if (topic === 'VVB001') {
-            const trendPoint = parseVibrationTrendPoint(data.value)
-            if (trendPoint) {
-              setSensorTrend((prev) => ({
-                ...prev,
-                VVB001: [...prev.VVB001, { ts, ...trendPoint }].slice(-SENSOR_TREND_MAX_POINTS),
-              }))
-            }
-          } else if (topic === 'TP3237') {
-            const trendPoint = parseTemperatureTrendPoint(data.value)
-            if (trendPoint) {
-              setSensorTrend((prev) => ({
-                ...prev,
-                TP3237: [...prev.TP3237, { ts, ...trendPoint }].slice(-SENSOR_TREND_MAX_POINTS),
-              }))
-            }
+          const trendPoint = parseVibrationTrendPoint(data.value)
+          if (trendPoint) {
+            setSensorTrend((prev) => ({
+              ...prev,
+              [normalizedTopic]: [...(prev[normalizedTopic] || []), { ts, ...trendPoint }].slice(-SENSOR_TREND_MAX_POINTS),
+            }))
           }
           setMqttConnected(true)
         }
@@ -110,16 +104,12 @@ export default function useDashboardEventSource({
           setSensorTrend((prev) => {
             const updated = { ...prev }
             for (const [topic, payload] of Object.entries(data)) {
+              const normalizedTopic = normalizeVibrationTopic(topic)
+              if (!normalizedTopic) continue
               const ts = Number(payload?.ts) || Date.now() / 1000
-              if (topic === 'VVB001') {
-                const trendPoint = parseVibrationTrendPoint(payload?.value)
-                if (!trendPoint) continue
-                updated.VVB001 = [...updated.VVB001, { ts, ...trendPoint }].slice(-SENSOR_TREND_MAX_POINTS)
-              } else if (topic === 'TP3237') {
-                const trendPoint = parseTemperatureTrendPoint(payload?.value)
-                if (!trendPoint) continue
-                updated.TP3237 = [...updated.TP3237, { ts, ...trendPoint }].slice(-SENSOR_TREND_MAX_POINTS)
-              }
+              const trendPoint = parseVibrationTrendPoint(payload?.value)
+              if (!trendPoint) continue
+              updated[normalizedTopic] = [...(updated[normalizedTopic] || []), { ts, ...trendPoint }].slice(-SENSOR_TREND_MAX_POINTS)
             }
             return updated
           })

@@ -22,7 +22,7 @@ export default function McProtocolPanel({
   onOpenMcEdit,
 }) {
   const [mcSubTab, setMcSubTab] = useState('card')
-  const [mcHost, setMcHost] = useState('127.0.0.1')
+  const [mcHost, setMcHost] = useState('192.168.0.5')
   const [mcPort, setMcPort] = useState('5002')
   const [localMcError, setLocalMcError] = useState('')
   const [showBitsCol, setShowBitsCol] = useState(false)
@@ -101,7 +101,7 @@ export default function McProtocolPanel({
                 type="text"
                 value={mcHost}
                 onChange={(e) => setMcHost(e.target.value)}
-                placeholder="127.0.0.1"
+                placeholder="192.168.0.5"
                 disabled={mcConnected}
               />
             </div>

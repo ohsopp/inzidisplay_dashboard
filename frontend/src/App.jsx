@@ -18,7 +18,7 @@ function App() {
   const [mcValues, setMcValues] = useState({})
   const [mcConnected, setMcConnected] = useState(false)
   const [mcError, setMcError] = useState('')
-  const [sensorTrend, setSensorTrend] = useState({ VVB001: [], TP3237: [] })
+  const [sensorTrend, setSensorTrend] = useState({ 'VVB001(A)': [], 'VVB001(B)': [] })
   const [mqttConnected, setMqttConnected] = useState(false)
   const [mqttError, setMqttError] = useState('')
   const [csvExportOpen, setCsvExportOpen] = useState(false)
@@ -128,7 +128,7 @@ function App() {
             onClick={() => setActiveView('dashboard')}
           >
             <span className="side-tab-label">센서 대시보드</span>
-            <span className="side-tab-desc">MQTT 진동/온도 실시간</span>
+            <span className="side-tab-desc">MQTT 진동 2채널 실시간</span>
           </button>
         </nav>
 
@@ -171,8 +171,8 @@ function App() {
               </div>
               <div className="dashboard-body">
                 <SensorTrendCharts
-                  vibrationTrend={sensorTrend.VVB001}
-                  temperatureTrend={sensorTrend.TP3237}
+                  vibrationTrendA={sensorTrend['VVB001(A)']}
+                  vibrationTrendB={sensorTrend['VVB001(B)']}
                 />
               </div>
             </section>

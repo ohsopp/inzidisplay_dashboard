@@ -51,11 +51,16 @@ _SCHEMA_TEMPERATURE = pa.schema(
 _SCHEMA_VIBRATION = pa.schema(
     [
         ("t_kst", pa.string()),
-        ("V-rms", pa.float64()),
-        ("a-peak", pa.float64()),
-        ("a-rms", pa.float64()),
-        ("temperature", pa.float64()),
-        ("crest", pa.float64()),
+        ("V-rms(A)", pa.float64()),
+        ("a-peak(A)", pa.float64()),
+        ("a-rms(A)", pa.float64()),
+        ("temperature(A)", pa.float64()),
+        ("crest(A)", pa.float64()),
+        ("V-rms(B)", pa.float64()),
+        ("a-peak(B)", pa.float64()),
+        ("a-rms(B)", pa.float64()),
+        ("temperature(B)", pa.float64()),
+        ("crest(B)", pa.float64()),
     ]
 )
 
@@ -114,6 +119,13 @@ def _row_for_point(
         except (TypeError, ValueError):
             row["value"] = None
     elif measurement_norm == "vibration":
+        sensor_type = str((tags or {}).get("sensor_type") or "").strip().upper()
+        suffix = ""
+        if sensor_type in ("VVB001-A", "VVB001(A)", "A"):
+            suffix = "(A)"
+        elif sensor_type in ("VVB001-B", "VVB001(B)", "B"):
+            suffix = "(B)"
+
         field_map = {
             "V-rms": "v_rms",
             "a-peak": "a_peak",
@@ -121,12 +133,14 @@ def _row_for_point(
             "temperature": "temperature",
             "crest": "crest",
         }
-        for col_name, src_name in field_map.items():
+        for metric_name, src_name in field_map.items():
             try:
                 v = (fields or {}).get(src_name)
-                row[col_name] = float(v) if v is not None else None
+                if suffix:
+                    row[f"{metric_name}{suffix}"] = float(v) if v is not None else None
             except (TypeError, ValueError):
-                row[col_name] = None
+                if suffix:
+                    row[f"{metric_name}{suffix}"] = None
     return key, row
 
 

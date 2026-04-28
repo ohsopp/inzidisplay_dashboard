@@ -9,10 +9,6 @@ const VIBRATION_LINES = [
   { key: 'crest', label: 'crest', color: '#c084fc', unit: '' },
 ]
 
-const TEMPERATURE_LINES = [
-  { key: 'temperature', label: 'temperature', color: '#ff7a7a', unit: '°C' },
-]
-
 function toFiniteNumber(value) {
   const n = Number(value)
   return Number.isFinite(n) ? n : null
@@ -271,24 +267,24 @@ function SensorTrendChart({ title, subtitle, points, lines, yLabel, chartType = 
   )
 }
 
-function SensorTrendCharts({ vibrationTrend, temperatureTrend }) {
+function SensorTrendCharts({ vibrationTrendA, vibrationTrendB }) {
   return (
     <section className="sensor-trends-section">
       <SensorTrendChart
-        title="VVB001 Multi-Metric Trend"
+        title="VVB001(A) Multi-Metric Trend"
         subtitle="v-rms, a-peak, a-rms, temperature, crest"
-        points={vibrationTrend}
+        points={vibrationTrendA}
         lines={VIBRATION_LINES}
         yLabel="Vibration"
         chartType="vibration"
       />
       <SensorTrendChart
-        title="TP3237 Temperature Trend"
-        subtitle="single channel temperature"
-        points={temperatureTrend}
-        lines={TEMPERATURE_LINES}
-        yLabel="Temperature (°C)"
-        chartType="temperature"
+        title="VVB001(B) Multi-Metric Trend"
+        subtitle="v-rms, a-peak, a-rms, temperature, crest"
+        points={vibrationTrendB}
+        lines={VIBRATION_LINES}
+        yLabel="Vibration"
+        chartType="vibration"
       />
     </section>
   )

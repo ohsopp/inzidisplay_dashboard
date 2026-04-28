@@ -1,7 +1,6 @@
 """
-MQTT 구독: 192.168.1.13:1883 에서 VVB001(진동), TP3237(온도) 구독 후 on_message 콜백으로 전달.
-VVB001(진동)과 TP3237(온도)는 vibration_decode.py / mqtt_service.py의 디코딩 로직을 참고해서
-프론트엔드에는 디코딩된 값만 전달한다.
+MQTT 구독: 192.168.1.13:1883 에서 VVB001(A), VVB001(B) 진동 토픽을 구독 후 on_message 콜백으로 전달.
+두 토픽 모두 vibration_decode.py / mqtt_service.py의 기존 진동 디코딩 로직을 동일 적용한다.
 """
 import json
 import threading
@@ -10,13 +9,13 @@ import os
 import sys
 
 try:
-    from vibration_decode import parse_hex_to_temperature, decode_vvb001, PDIN_PATHS
+    from vibration_decode import decode_vvb001, PDIN_PATHS
 except ImportError:
     # backend/에서 실행될 때 프로젝트 루트에 있는 vibration_decode.py를 찾기 위한 보정
     ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
     if ROOT_DIR not in sys.path:
         sys.path.append(ROOT_DIR)
-    from vibration_decode import parse_hex_to_temperature, decode_vvb001, PDIN_PATHS
+    from vibration_decode import decode_vvb001, PDIN_PATHS
 
 from influxdb_config import INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG
 try:
@@ -32,12 +31,16 @@ except ImportError:
 # - MQTT_PORT / IOLINK_MQTT_PORT
 # 기본값: 사내망 브로커(환경변수 MQTT_BROKER / IOLINK_MQTT_BROKER 로 덮어쓰기).
 MQTT_BROKER = (
-    (os.environ.get("MQTT_BROKER") or os.environ.get("IOLINK_MQTT_BROKER") or "192.168.1.13")
+    (os.environ.get("MQTT_BROKER") or os.environ.get("IOLINK_MQTT_BROKER") or "192.168.0.3")
     .strip()
-    or "192.168.1.13"
+    or "192.168.0.3"
 )
 MQTT_PORT = int((os.environ.get("MQTT_PORT") or os.environ.get("IOLINK_MQTT_PORT") or "1883").strip() or "1883")
-TOPICS = ["VVB001", "TP3237"]  # 진동, 온도
+TOPICS = ["VVB001-A", "VVB001-B"]  # 진동 2채널
+TOPIC_ALIAS = {
+    "VVB001-A": "VVB001-A",
+    "VVB001-B": "VVB001-B",
+}
 IOLINK_INFLUX_BUCKET = (os.environ.get("IOLINK_INFLUX_BUCKET") or "io_link_master").strip() or "io_link_master"
 
 _mqtt_thread = None
@@ -69,29 +72,11 @@ def _get_influx_write_api():
         return None
 
 
-def _write_iolink_temperature(value: float, ts_sec: float):
-    api = _get_influx_write_api()
-    if api is not None:
-        try:
-            from influxdb_client import Point
-            p = Point("temperature").field("value", float(value)).time(int(ts_sec * 1_000_000_000))
-            api.write(bucket=IOLINK_INFLUX_BUCKET, org=INFLUX_ORG, record=p)
-        except Exception as e:
-            print("[MQTT] temperature Influx 저장 실패:", e, flush=True)
-    try:
-        append_point_to_parquet(
-            bucket=IOLINK_INFLUX_BUCKET,
-            measurement="temperature",
-            tags={},
-            fields={"value": float(value)},
-            timestamp_ns=int(ts_sec * 1_000_000_000),
-            source="mqtt_subscriber_tp3237",
-        )
-    except Exception as e:
-        print("[MQTT] temperature Parquet 저장 실패:", e, flush=True)
-
-
-def _write_iolink_vibration(decoded: dict, ts_sec: float):
+def _write_iolink_vibration(decoded: dict, ts_sec: float, sensor_tag: str):
+    if sensor_tag == "VVB001(A)":
+        sensor_tag = "VVB001-A"
+    elif sensor_tag == "VVB001(B)":
+        sensor_tag = "VVB001-B"
     fields = {
         "v_rms": float(decoded.get("v_rms", 0)) if decoded.get("v_rms") is not None else 0.0,
         "a_peak": float(decoded.get("a_peak", 0)) if decoded.get("a_peak") is not None else 0.0,
@@ -103,7 +88,7 @@ def _write_iolink_vibration(decoded: dict, ts_sec: float):
     if api is not None:
         try:
             from influxdb_client import Point
-            p = Point("vibration").tag("sensor_type", "VVB001")
+            p = Point("vibration").tag("sensor_type", sensor_tag)
             for key, value in fields.items():
                 p = p.field(key, value)
             p = p.time(int(ts_sec * 1_000_000_000))
@@ -114,10 +99,10 @@ def _write_iolink_vibration(decoded: dict, ts_sec: float):
         append_point_to_parquet(
             bucket=IOLINK_INFLUX_BUCKET,
             measurement="vibration",
-            tags={"sensor_type": "VVB001"},
+            tags={"sensor_type": sensor_tag},
             fields=fields,
             timestamp_ns=int(ts_sec * 1_000_000_000),
-            source="mqtt_subscriber_vvb001",
+            source=f"mqtt_subscriber_{sensor_tag.replace('(', '').replace(')', '').lower()}",
         )
     except Exception as e:
         print("[MQTT] vibration Parquet 저장 실패:", e, flush=True)
@@ -209,6 +194,7 @@ def _run_mqtt_loop(on_message):
     def on_message_cb(client, userdata, msg):
         topic = msg.topic
         topic_last = topic.split("/")[-1] if isinstance(topic, str) else topic
+        mapped_topic = TOPIC_ALIAS.get(topic_last, topic_last)
         raw = msg.payload
         ts = time.time()
 
@@ -221,23 +207,7 @@ def _run_mqtt_loop(on_message):
         except Exception:
             data = {}
 
-        if topic_last == "TP3237":
-            # mqtt_service.py 의 TP3237 처리 로직 참고
-            try:
-                payload = data.get("data", {}).get("payload", {}) if isinstance(data, dict) else {}
-                hex_data = None
-                if isinstance(payload, dict):
-                    hex_data = payload.get("/iolinkmaster/port[2]/iolinkdevice/pdin", {}).get("data")
-                    if not hex_data:
-                        hex_data = payload.get("/iolinkmaster/port[1]/iolinkdevice/pdin", {}).get("data")
-                if hex_data:
-                    decoded_value = parse_hex_to_temperature(hex_data)
-                    if decoded_value is not None:
-                        _write_iolink_temperature(float(decoded_value), ts)
-            except Exception:
-                decoded_value = None
-
-        elif topic_last == "VVB001":
+        if mapped_topic in ("VVB001(A)", "VVB001(B)", "VVB001-A", "VVB001-B"):
             # mqtt_service.py 의 진동 처리 로직 참고
             # vibration_decode.decode_vvb001를 그대로 사용해서 전체 디코딩 결과(dict)를 전달
             try:
@@ -253,7 +223,7 @@ def _run_mqtt_loop(on_message):
                     if decoded and isinstance(decoded, dict):
                         # v_rms, a_peak, a_rms, temperature, crest, device_status 등 전체 dict 전달
                         decoded_value = decoded
-                        _write_iolink_vibration(decoded, ts)
+                        _write_iolink_vibration(decoded, ts, mapped_topic)
             except Exception:
                 decoded_value = None
 
@@ -261,22 +231,27 @@ def _run_mqtt_loop(on_message):
         if decoded_value is None:
             decoded_value = _parse_payload(raw)
 
-        last_values[topic_last] = {
+        last_values[mapped_topic] = {
             "value": decoded_value,
             "raw": raw.hex() if raw else "",
-            "topic": topic_last,
+            "topic": mapped_topic,
         }
         if on_message:
-            on_message("sensor_data", {"topic": topic_last, "value": decoded_value, "ts": ts})
+            on_message("sensor_data", {"topic": mapped_topic, "value": decoded_value, "ts": ts})
 
     client.on_connect = on_connect
     client.on_message = on_message_cb
-    try:
-        client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-    except Exception as e:
-        print(f"[MQTT] connect 예외: {e}", flush=True)
-        if on_message:
-            on_message("mqtt_error", {"message": str(e)})
+    connected = False
+    while not connected and not (stop and stop.is_set()):
+        try:
+            client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+            connected = True
+        except Exception as e:
+            print(f"[MQTT] connect 예외: {e} (5초 후 재시도)", flush=True)
+            if on_message:
+                on_message("mqtt_error", {"message": str(e)})
+            time.sleep(5)
+    if not connected:
         return
     client.loop_start()
     while not (stop and stop.is_set()):

@@ -38,8 +38,8 @@ mc_influx_stop_event = None
 # 폴링 스레드별 수신 데이터를 블로킹 없이 즉시 InfluxDB에 저장하기 위한 전용 스레드 풀
 _influx_write_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="influx_write")
 
-# MQTT 센서 (VVB001 진동, TP3237 온도) - 마지막 수신값 (새 SSE 클라이언트용)
-last_sensor_data = {}  # {"VVB001": {"value": ..., "ts": ...}, "TP3237": {...}}
+# MQTT 센서 (VVB001(A), VVB001(B) 진동) - 마지막 수신값 (새 SSE 클라이언트용)
+last_sensor_data = {}  # {"VVB001(A)": {"value": ..., "ts": ...}, "VVB001(B)": {...}}
 # MQTT 연결 상태 (에러는 앱 기동 직후 발생 시 SSE 클라이언트 없어서 안 보임 → 스냅샷으로 전달)
 mqtt_status = {"connected": False, "error": ""}  # 새로 접속 시 화면에 표시용
 
@@ -241,7 +241,7 @@ def mc_connect():
     try:
         global mc_thread, mc_stop_event, mc_state, mc_influx_stop_event
         data = request.get_json(silent=True) or {}
-        host = (data.get("host") or "127.0.0.1").strip()
+        host = (data.get("host") or "192.168.0.5").strip()
         port = int(data.get("port", 5002))
     except (TypeError, ValueError) as e:
         return {"error": f"잘못된 요청: {e}"}, 400
